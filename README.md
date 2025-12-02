@@ -1,71 +1,72 @@
 # Elsesser Bot 🤖
 
-Telegram-бот для приватного канала с рецептами. Управление подписками, оплатой и доступом через админ-панель.
+Telegram bot for a private recipe channel. Manage subscriptions, payments, and access through an admin panel.
 
-## Стек
+## Stack
 
 - **Python 3.11+**
-- **aiogram 3.x** - асинхронный фреймворк для Telegram Bot API
-- **aiosqlite** - асинхронная работа с SQLite
-- **python-dotenv** - управление переменными окружения
+- **aiogram 3.x** - asynchronous framework for Telegram Bot API
+- **aiosqlite** - asynchronous SQLite operations
+- **python-dotenv** - environment variable management
 
-## Структура
+## Structure
 
 ```
-├── bot.py              # Точка входа
-├── config.py           # Конфигурация (env переменные)
-├── database.py         # Работа с БД
+├── bot.py              # Entry point
+├── config.py           # Configuration (env variables)
+├── database.py         # Database operations
 ├── handlers/
-│   ├── user.py         # Хендлеры пользователя
-│   └── admin.py        # Админ-панель
+│   ├── user.py         # User handlers
+│   └── admin.py        # Admin panel
 ├── keyboards/
-│   ├── user_kb.py      # Клавиатуры пользователя
-│   ├── admin_kb.py     # Клавиатуры админа
+│   ├── user_kb.py      # User keyboards
+│   ├── admin_kb.py     # Admin keyboards
 │   └── callbacks.py    # Callback factories
 └── data/
-    └── recipes.py      # Данные рецептов
+    └── recipes.py      # Recipe data
 ```
 
-## Переменные окружения
+## Environment Variables
 
-Создайте `.env` файл:
+Create a `.env` file:
 
-```env
+```
 BOT_TOKEN=your_bot_token
 ADMIN_CHANNEL_ID=-100xxxxxxxxxx
 PAYMENT_AMOUNT=500
-PAYMENT_DETAILS=Номер карты: 1234 5678 9012 3456
+PAYMENT_DETAILS=Card number: 1234 5678 9012 3456
 ```
 
-## Локальный запуск
+## Local Setup
 
-```bash
+```
 pip install -r requirements.txt
 python bot.py
 ```
 
-## Деплой на Render.com
+## Deploy to Render.com
 
-1. Создать **Background Worker** (не Web Service!)
-2. Подключить GitHub репозиторий
-3. Настроить:
+1. Create a **Background Worker** (not Web Service!)
+2. Connect GitHub repository
+3. Configure:
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `python bot.py`
-4. Добавить Environment Variables:
+4. Add Environment Variables:
    - `BOT_TOKEN`
    - `ADMIN_CHANNEL_ID`
    - `PAYMENT_AMOUNT`
    - `PAYMENT_DETAILS`
 
-## Функционал
+## Features
 
-**Для пользователей:**
-- Просмотр демо-рецептов
-- Оплата подписки
-- Доступ к приватному каналу после подтверждения
+**For users:**
+- View demo recipes
+- Pay for subscription
+- Access private channel after confirmation
 
-**Для админов:**
-- Просмотр заявок на оплату
-- Подтверждение/отклонение оплат
-- Управление пользователями
-- Статистика
+**For admins:**
+- Review payment requests
+- Approve/reject payments
+- Manage users
+- Statistics
+```
