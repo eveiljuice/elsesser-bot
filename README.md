@@ -69,4 +69,3 @@ python bot.py
 - Approve/reject payments
 - Manage users
 - Statistics
-```
