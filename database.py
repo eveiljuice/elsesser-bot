@@ -41,6 +41,29 @@ async def init_db():
                 UNIQUE(calories, day, meal_type)
             )
         ''')
+        # Таблица для результатов калькулятора калорий
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS calculator_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                gender TEXT,
+                age INTEGER,
+                height REAL,
+                weight REAL,
+                steps INTEGER,
+                cardio INTEGER,
+                strength INTEGER,
+                goal TEXT,
+                hormones TEXT,
+                level TEXT,
+                calories REAL,
+                protein INTEGER,
+                fats INTEGER,
+                carbs REAL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(user_id)
+            )
+        ''')
         await db.commit()
 
 
@@ -184,3 +207,60 @@ async def delete_recipe(calories: int, day: int, meal_type: str) -> bool:
         )
         await db.commit()
         return cursor.rowcount > 0
+
+
+# ==================== Calculator Results ====================
+
+async def save_calculator_result(
+    user_id: int,
+    gender: str,
+    age: int,
+    height: float,
+    weight: float,
+    steps: int,
+    cardio: int,
+    strength: int,
+    goal: str,
+    hormones: str,
+    level: str,
+    calories: float,
+    protein: int,
+    fats: int,
+    carbs: float
+):
+    """Сохранить результаты калькулятора калорий"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        await db.execute('''
+            INSERT INTO calculator_results 
+            (user_id, gender, age, height, weight, steps, cardio, strength, 
+             goal, hormones, level, calories, protein, fats, carbs, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            user_id, gender, age, height, weight, steps, cardio, strength,
+            goal, hormones, level, calories, protein, fats, carbs,
+            datetime.now().isoformat()
+        ))
+        await db.commit()
+
+
+async def get_last_calculator_result(user_id: int) -> Optional[dict]:
+    """Получить последний результат калькулятора для пользователя"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            'SELECT * FROM calculator_results WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def has_calculator_result(user_id: int) -> bool:
+    """Проверить, проходил ли пользователь калькулятор"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute(
+            'SELECT COUNT(*) FROM calculator_results WHERE user_id = ?',
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] > 0 if row else False

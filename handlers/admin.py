@@ -18,6 +18,7 @@ from keyboards.callbacks import (
     AdminEditCallback
 )
 from keyboards.user_kb import get_main_menu
+from keyboards.calculator_kb import get_start_calculator_keyboard
 from keyboards.admin_kb import (
     get_payment_verification_keyboard,
     get_admin_main_menu,
@@ -438,18 +439,36 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
         parse_mode=ParseMode.HTML
     )
 
-    # Уведомляем пользователя
+    # Уведомляем пользователя и предлагаем пройти калькулятор
     try:
+        # Сначала отправляем меню
         await bot.send_message(
             chat_id=user_id,
             text=(
                 "🎉 <b>Оплата подтверждена!</b>\n\n"
-                "Теперь у тебя есть полный доступ ко всем рационам питания!\n\n"
-                "Нажми «🍽 Выбрать рацион» чтобы начать 👇"
+                "Теперь у тебя есть полный доступ ко всем рационам питания!"
             ),
             reply_markup=get_main_menu(),
             parse_mode=ParseMode.HTML
         )
+
+        # Затем предлагаем пройти калькулятор
+        await bot.send_message(
+            chat_id=user_id,
+            text=(
+                "📊 <b>Определи свой идеальный рацион!</b>\n\n"
+                "Чтобы подобрать рацион, который подходит именно тебе, "
+                "пройди короткую анкету. Калькулятор рассчитает:\n\n"
+                "• 🔥 Твою дневную калорийность\n"
+                "• 🥩 Норму белков, жиров и углеводов\n"
+                "• ⚖️ Оптимальный вес\n"
+                "• 📏 Индекс массы тела\n\n"
+                "Это займёт всего 2 минуты 👇"
+            ),
+            reply_markup=get_start_calculator_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+
         logger.info(
             f"Payment approved for user {user_id} by admin {callback.from_user.id}")
     except Exception as e:

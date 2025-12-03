@@ -13,6 +13,7 @@ from keyboards.user_kb import (
     get_days_keyboard,
     get_back_to_calories_keyboard,
 )
+from keyboards.calculator_kb import get_start_calculator_keyboard
 from keyboards.admin_kb import get_payment_verification_keyboard
 from keyboards.callbacks import PaymentCallback, CaloriesCallback, DayCallback, BackCallback
 from data.recipes import get_recipe_text_async, get_available_calories
@@ -39,6 +40,17 @@ async def cmd_start(message: Message):
             reply_markup=get_main_menu(),
             parse_mode=ParseMode.HTML
         )
+
+        # Проверяем, проходил ли калькулятор
+        has_calc = await db.has_calculator_result(user.id)
+        if not has_calc:
+            await message.answer(
+                "💡 <b>Рекомендуем пройти калькулятор калорий!</b>\n\n"
+                "Это поможет подобрать рацион, который идеально подходит именно вам.\n"
+                "Нажмите кнопку ниже 👇",
+                reply_markup=get_start_calculator_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
     else:
         await message.answer(
             f"👋 <b>Привет, {user.first_name}!</b>\n\n"
@@ -138,6 +150,50 @@ async def my_status(message: Message):
 async def help_button(message: Message):
     """Помощь через кнопку меню"""
     await cmd_help(message)
+
+
+@router.message(F.text == "📊 Рассчитать калории")
+async def calculate_calories_button(message: Message):
+    """Запуск калькулятора калорий"""
+    has_paid = await db.check_payment_status(message.from_user.id)
+
+    if not has_paid:
+        await message.answer(
+            "⛔ <b>Доступ ограничен</b>\n\n"
+            f"Для использования калькулятора необходимо оплатить доступ ({PAYMENT_AMOUNT} ₽).",
+            parse_mode=ParseMode.HTML
+        )
+        await show_payment_info(message)
+        return
+
+    # Проверяем, проходил ли пользователь калькулятор ранее
+    last_result = await db.get_last_calculator_result(message.from_user.id)
+
+    if last_result:
+        await message.answer(
+            "📊 <b>Калькулятор калорий</b>\n\n"
+            f"В прошлый раз ваши результаты были:\n"
+            f"• Калорийность: <b>{last_result['calories']}</b> ккал\n"
+            f"• Белки: <b>{last_result['protein']}</b> г\n"
+            f"• Жиры: <b>{last_result['fats']}</b> г\n"
+            f"• Углеводы: <b>{last_result['carbs']}</b> г\n\n"
+            "Хотите пересчитать?",
+            reply_markup=get_start_calculator_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        await message.answer(
+            "📊 <b>Калькулятор калорий</b>\n\n"
+            "Чтобы подобрать рацион, который подходит именно вам, "
+            "пройдите короткую анкету. Калькулятор рассчитает:\n\n"
+            "• 🔥 Вашу дневную калорийность\n"
+            "• 🥩 Норму белков, жиров и углеводов\n"
+            "• ⚖️ Оптимальный вес\n"
+            "• 📏 Индекс массы тела\n\n"
+            "Это займёт всего 2 минуты 👇",
+            reply_markup=get_start_calculator_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
 
 
 # ==================== Оплата ====================

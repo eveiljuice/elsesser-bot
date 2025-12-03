@@ -9,7 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN
 import database as db
-from handlers import user_router, admin_router
+from handlers import user_router, admin_router, calculator_router
 
 
 # Настройка логирования
@@ -61,6 +61,7 @@ async def main():
     # Регистрация роутеров
     dp.include_router(user_router)
     dp.include_router(admin_router)
+    dp.include_router(calculator_router)
 
     # Регистрация событий startup/shutdown
     dp.startup.register(on_startup)

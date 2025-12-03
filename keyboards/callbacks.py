@@ -60,3 +60,35 @@ class AdminEditCallback(CallbackData, prefix="adm_edit"):
     calories: int
     day: int
     meal: str
+
+
+# ==================== Calculator Callbacks ====================
+
+class CalcGenderCallback(CallbackData, prefix="calc_gender"):
+    """Callback для выбора пола"""
+    gender: str  # male / female
+
+
+class CalcGoalCallback(CallbackData, prefix="calc_goal"):
+    """Callback для выбора цели"""
+    goal: str  # loss / maintain / gain
+
+
+class CalcHormonesCallback(CallbackData, prefix="calc_hormones"):
+    """Callback для выбора гормональных нарушений"""
+    hormones: str  # none / hypothyroidism / insulin / deficiency / other
+
+
+class CalcLevelCallback(CallbackData, prefix="calc_level"):
+    """Callback для выбора уровня"""
+    level: str  # amateur / professional
+
+
+class CalcNavCallback(CallbackData, prefix="calc_nav"):
+    """Callback для навигации в калькуляторе"""
+    action: str  # next / back / start / restart
+
+
+class CalcStartCallback(CallbackData, prefix="calc_start"):
+    """Callback для запуска калькулятора"""
+    pass
