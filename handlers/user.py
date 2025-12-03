@@ -240,7 +240,17 @@ async def payment_done(callback: CallbackQuery, bot: Bot):
         return
 
     # Отправляем сообщение админам
-    username_display = f"@{user.username}" if user.username else f"ID: {user.id}"
+    # Формируем отображение пользователя:
+    # - Если есть username: @username
+    # - Если нет username: кликабельная ссылка с именем через tg://user
+    if user.username:
+        username_display = f"@{user.username}"
+    else:
+        # HTML mention - кликабельная ссылка на пользователя
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip(
+        ) or f"User {user.id}"
+        username_display = f'<a href="tg://user?id={user.id}">{full_name}</a>'
+
     admin_message = await bot.send_message(
         chat_id=ADMIN_CHANNEL_ID,
         text=(

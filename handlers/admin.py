@@ -429,13 +429,19 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
 
     # Получаем информацию о пользователе
     user = await db.get_user(user_id)
-    username_display = f"@{user['username']}" if user and user.get(
-        'username') else f"ID: {user_id}"
+
+    # Формируем отображение для админа, кто обработал
+    if callback.from_user.username:
+        admin_display = f"@{callback.from_user.username}"
+    else:
+        admin_name = f"{callback.from_user.first_name or ''} {callback.from_user.last_name or ''}".strip(
+        ) or f"Admin {callback.from_user.id}"
+        admin_display = f'<a href="tg://user?id={callback.from_user.id}">{admin_name}</a>'
 
     # Обновляем сообщение в админском канале
     await callback.message.edit_text(
         callback.message.text + f"\n\n✅ <b>ОДОБРЕНО</b>\n"
-        f"👤 Обработал: @{callback.from_user.username or callback.from_user.id}",
+        f"👤 Обработал: {admin_display}",
         parse_mode=ParseMode.HTML
     )
 
@@ -503,13 +509,19 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
 
     # Получаем информацию о пользователе
     user = await db.get_user(user_id)
-    username_display = f"@{user['username']}" if user and user.get(
-        'username') else f"ID: {user_id}"
+
+    # Формируем отображение для админа, кто обработал
+    if callback.from_user.username:
+        admin_display = f"@{callback.from_user.username}"
+    else:
+        admin_name = f"{callback.from_user.first_name or ''} {callback.from_user.last_name or ''}".strip(
+        ) or f"Admin {callback.from_user.id}"
+        admin_display = f'<a href="tg://user?id={callback.from_user.id}">{admin_name}</a>'
 
     # Обновляем сообщение в админском канале
     await callback.message.edit_text(
         callback.message.text + f"\n\n❌ <b>ОТКЛОНЕНО</b>\n"
-        f"👤 Обработал: @{callback.from_user.username or callback.from_user.id}",
+        f"👤 Обработал: {admin_display}",
         parse_mode=ParseMode.HTML
     )
 
