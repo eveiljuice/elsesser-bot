@@ -127,8 +127,7 @@ async def cmd_admin(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer(
-        "🍽 <b>Панель управления рационами</b>\n\n"
-        "Управление планами питания на 14 дней.\n"
+        "👨‍💼 <b>Админ-панель</b>\n\n"
         "Выберите действие:",
         reply_markup=get_admin_main_menu(),
         parse_mode=ParseMode.HTML
