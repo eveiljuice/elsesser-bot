@@ -1,8 +1,10 @@
 import logging
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.filters import Command, CommandStart
 from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 import database as db
 from config import PAYMENT_AMOUNT, PAYMENT_DETAILS, ADMIN_CHANNEL_ID
@@ -20,6 +22,13 @@ from data.recipes import get_recipe_text_async, get_available_calories
 
 logger = logging.getLogger(__name__)
 router = Router(name="user")
+
+
+# ==================== FSM States ====================
+
+class PaymentState(StatesGroup):
+    """Состояния для процесса оплаты"""
+    waiting_for_screenshot = State()
 
 
 # ==================== Команды ====================
@@ -216,9 +225,17 @@ async def show_payment_info(message: Message):
     )
 
 
+def get_cancel_payment_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура отмены отправки скриншота"""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True
+    )
+
+
 @router.callback_query(PaymentCallback.filter())
-async def payment_done(callback: CallbackQuery, bot: Bot):
-    """Пользователь нажал 'Я оплатил(а)'"""
+async def payment_done(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    """Пользователь нажал 'Я оплатил(а)' - просим скриншот"""
     user = callback.from_user
 
     # Проверяем, нет ли уже активного запроса
@@ -239,21 +256,56 @@ async def payment_done(callback: CallbackQuery, bot: Bot):
         )
         return
 
-    # Отправляем сообщение админам
-    # Формируем отображение пользователя:
-    # - Если есть username: @username
-    # - Если нет username: кликабельная ссылка с именем через tg://user
+    # Устанавливаем состояние ожидания скриншота
+    await state.set_state(PaymentState.waiting_for_screenshot)
+
+    await callback.answer()
+    await callback.message.answer(
+        "📸 <b>Отправь скриншот оплаты</b>\n\n"
+        "Пожалуйста, отправь фото/скриншот подтверждения перевода.\n"
+        "Это поможет модераторам быстрее проверить твою оплату.\n\n"
+        "⚠️ <i>На скриншоте должны быть видны: сумма, дата и получатель.</i>",
+        reply_markup=get_cancel_payment_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(F.text == "❌ Отмена", PaymentState.waiting_for_screenshot)
+async def cancel_payment_screenshot(message: Message, state: FSMContext):
+    """Отмена отправки скриншота"""
+    await state.clear()
+    await message.answer(
+        "❌ Отправка отменена.\n\n"
+        "Когда будешь готов — нажми кнопку «Я оплатил(а)» снова.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(F.photo, PaymentState.waiting_for_screenshot)
+async def receive_payment_screenshot(message: Message, bot: Bot, state: FSMContext):
+    """Получение скриншота оплаты и отправка модераторам"""
+    user = message.from_user
+
+    # Очищаем состояние
+    await state.clear()
+
+    # Получаем file_id самого большого фото (лучшее качество)
+    photo = message.photo[-1]
+    photo_file_id = photo.file_id
+
+    # Формируем отображение пользователя
     if user.username:
         username_display = f"@{user.username}"
     else:
-        # HTML mention - кликабельная ссылка на пользователя
-        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip(
-        ) or f"User {user.id}"
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or f"User {user.id}"
         username_display = f'<a href="tg://user?id={user.id}">{full_name}</a>'
 
-    admin_message = await bot.send_message(
+    # Отправляем фото со скриншотом в канал модераторов
+    admin_message = await bot.send_photo(
         chat_id=ADMIN_CHANNEL_ID,
-        text=(
+        photo=photo_file_id,
+        caption=(
             "🔔 <b>Новый запрос на проверку оплаты!</b>\n\n"
             f"👤 Пользователь: {username_display}\n"
             f"📝 Имя: {user.first_name or 'Не указано'}\n"
@@ -271,12 +323,22 @@ async def payment_done(callback: CallbackQuery, bot: Bot):
         reply_markup=get_payment_verification_keyboard(user.id, request_id)
     )
 
-    await callback.answer("✅ Запрос отправлен на проверку!")
-    await callback.message.answer(
+    await message.answer(
         "✅ <b>Запрос отправлен!</b>\n\n"
-        "Администратор проверит оплату в ближайшее время.\n"
+        "Скриншот оплаты передан модераторам.\n"
         "Ты получишь уведомление о результате.\n\n"
         "⏳ Обычно проверка занимает до 24 часов.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(PaymentState.waiting_for_screenshot)
+async def wrong_payment_content(message: Message):
+    """Неверный формат - ожидаем фото"""
+    await message.answer(
+        "⚠️ <b>Пожалуйста, отправь фото/скриншот оплаты.</b>\n\n"
+        "Если хочешь отменить — нажми кнопку «❌ Отмена».",
         parse_mode=ParseMode.HTML
     )
 

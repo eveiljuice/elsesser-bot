@@ -413,15 +413,27 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
     user_id = callback_data.user_id
     request_id = callback_data.request_id
 
+    logger.info(f"Admin {callback.from_user.id} approving payment: user_id={user_id}, request_id={request_id}")
+
     # Получаем информацию о запросе
     request = await db.get_payment_request(request_id)
     if not request:
-        await callback.answer("❌ Запрос не найден!", show_alert=True)
+        logger.warning(f"Payment request {request_id} not found in database")
+        await callback.answer(
+            "❌ Запрос не найден в базе!\nВозможно, это старый запрос или бот был перезапущен.",
+            show_alert=True
+        )
         return
 
     if request['status'] != 'pending':
-        await callback.answer("⚠️ Этот запрос уже обработан!", show_alert=True)
+        logger.info(f"Payment request {request_id} already processed: status={request['status']}")
+        await callback.answer(
+            f"⚠️ Этот запрос уже обработан!\nСтатус: {request['status']}",
+            show_alert=True
+        )
         return
+
+    logger.info(f"Processing payment approval for user {user_id}")
 
     # Обновляем статус оплаты пользователя
     await db.set_payment_status(user_id, True)
@@ -439,11 +451,22 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
         admin_display = f'<a href="tg://user?id={callback.from_user.id}">{admin_name}</a>'
 
     # Обновляем сообщение в админском канале
-    await callback.message.edit_text(
-        callback.message.text + f"\n\n✅ <b>ОДОБРЕНО</b>\n"
-        f"👤 Обработал: {admin_display}",
-        parse_mode=ParseMode.HTML
-    )
+    # Проверяем, это фото (со скриншотом) или текстовое сообщение
+    original_text = callback.message.caption or callback.message.text or ""
+    new_text = original_text + f"\n\n✅ <b>ОДОБРЕНО</b>\n👤 Обработал: {admin_display}"
+    
+    if callback.message.photo:
+        # Сообщение с фото - редактируем caption
+        await callback.message.edit_caption(
+            caption=new_text,
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        # Текстовое сообщение
+        await callback.message.edit_text(
+            new_text,
+            parse_mode=ParseMode.HTML
+        )
 
     # Уведомляем пользователя и предлагаем пройти калькулятор
     try:
@@ -519,11 +542,22 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
         admin_display = f'<a href="tg://user?id={callback.from_user.id}">{admin_name}</a>'
 
     # Обновляем сообщение в админском канале
-    await callback.message.edit_text(
-        callback.message.text + f"\n\n❌ <b>ОТКЛОНЕНО</b>\n"
-        f"👤 Обработал: {admin_display}",
-        parse_mode=ParseMode.HTML
-    )
+    # Проверяем, это фото (со скриншотом) или текстовое сообщение
+    original_text = callback.message.caption or callback.message.text or ""
+    new_text = original_text + f"\n\n❌ <b>ОТКЛОНЕНО</b>\n👤 Обработал: {admin_display}"
+    
+    if callback.message.photo:
+        # Сообщение с фото - редактируем caption
+        await callback.message.edit_caption(
+            caption=new_text,
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        # Текстовое сообщение
+        await callback.message.edit_text(
+            new_text,
+            parse_mode=ParseMode.HTML
+        )
 
     # Уведомляем пользователя
     try:
