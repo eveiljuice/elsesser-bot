@@ -781,7 +781,7 @@ async def nav_to_rations(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         "🔥 <b>Выбери калорийность рациона:</b>\n\n"
-        "Доступные варианты от 1600 до 2100 ккал.",
+        "Доступные варианты от 1200 до 2100 ккал.",
         reply_markup=get_calories_keyboard(),
         parse_mode=ParseMode.HTML
     )

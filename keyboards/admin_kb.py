@@ -38,6 +38,7 @@ def get_admin_main_menu() -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.button(text="📝 Редактировать рационы")
     builder.button(text="📊 Статистика")
+    builder.button(text="📬 Отправить недельный отчёт")
     builder.button(text="🔙 Выйти из админки")
     builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)

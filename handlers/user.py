@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import database as db
+from database import EventType
 from config import PAYMENT_AMOUNT, PAYMENT_DETAILS, ADMIN_CHANNEL_ID
 from keyboards.user_kb import (
     get_main_menu,
@@ -38,6 +39,9 @@ async def cmd_start(message: Message):
     """Обработка команды /start"""
     user = message.from_user
     await db.add_user(user.id, user.username, user.first_name)
+    
+    # Логируем событие /start
+    await db.log_event(user.id, EventType.START_COMMAND)
 
     has_paid = await db.check_payment_status(user.id)
 
@@ -119,7 +123,7 @@ async def cmd_status(message: Message):
         await message.answer(
             "❌ <b>Статус: Не оплачено</b>\n\n"
             f"Для получения доступа оплати {PAYMENT_AMOUNT} ₽\n"
-            "и нажми кнопку «Я оплатил(а)».",
+            "и нажми кнопку «Я оплатила».",
             parse_mode=ParseMode.HTML
         )
         await show_payment_info(message)
@@ -143,7 +147,7 @@ async def choose_ration(message: Message):
 
     await message.answer(
         "🔥 <b>Выбери калорийность рациона:</b>\n\n"
-        "Доступные варианты от 1600 до 2100 ккал.",
+        "Доступные варианты от 1200 до 2100 ккал.",
         reply_markup=get_calories_keyboard(),
         parse_mode=ParseMode.HTML
     )
@@ -237,6 +241,9 @@ def get_cancel_payment_keyboard() -> ReplyKeyboardMarkup:
 async def payment_done(callback: CallbackQuery, bot: Bot, state: FSMContext):
     """Пользователь нажал 'Я оплатил(а)' - просим скриншот"""
     user = callback.from_user
+    
+    # Логируем нажатие кнопки "Я оплатил(а)"
+    await db.log_event(user.id, EventType.PAYMENT_BUTTON_CLICKED)
 
     # Проверяем, нет ли уже активного запроса
     has_pending = await db.has_pending_request(user.id)
@@ -286,6 +293,9 @@ async def cancel_payment_screenshot(message: Message, state: FSMContext):
 async def receive_payment_screenshot(message: Message, bot: Bot, state: FSMContext):
     """Получение скриншота оплаты и отправка модераторам"""
     user = message.from_user
+    
+    # Логируем отправку скриншота
+    await db.log_event(user.id, EventType.SCREENSHOT_SENT)
 
     # Очищаем состояние
     await state.clear()
@@ -395,7 +405,7 @@ async def go_back(callback: CallbackQuery, callback_data: BackCallback):
     if callback_data.to == "calories":
         await callback.message.edit_text(
             "🔥 <b>Выбери калорийность рациона:</b>\n\n"
-            "Доступные варианты от 1600 до 2100 ккал.",
+            "Доступные варианты от 1200 до 2100 ккал.",
             reply_markup=get_calories_keyboard(),
             parse_mode=ParseMode.HTML
         )

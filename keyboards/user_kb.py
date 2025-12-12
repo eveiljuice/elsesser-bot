@@ -19,7 +19,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 def get_payment_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для оплаты"""
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Я оплатил(а)", callback_data=PaymentCallback())
+    builder.button(text="✅ Я оплатила", callback_data=PaymentCallback())
     return builder.as_markup()
 
 

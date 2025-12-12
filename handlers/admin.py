@@ -8,7 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import database as db
-from config import ADMIN_USERNAMES
+from database import EventType
+from config import ADMIN_USERNAMES, ADMIN_CHANNEL_ID
 from keyboards.callbacks import (
     AdminCallback,
     AdminMenuCallback,
@@ -149,20 +150,169 @@ async def edit_rations(message: Message, state: FSMContext):
 
 @router.message(F.text == "📊 Статистика")
 async def show_stats(message: Message):
-    """Показать статистику"""
+    """Показать расширенную статистику"""
     if not is_admin(message.from_user.username):
         return
 
-    # Простая статистика
+    # Получаем статистику
+    stats = await db.get_stats()
     custom_recipes = await db.get_all_custom_recipes()
 
+    # Рассчитываем конверсии
+    total = stats['total_users'] or 1  # избегаем деления на 0
+    started = stats['started_users'] or total
+    clicked = stats['clicked_payment_btn'] or 1
+
+    conv_start_to_click = (
+        stats['clicked_payment_btn'] / started * 100) if started else 0
+    conv_click_to_screen = (
+        stats['sent_screenshot'] / clicked * 100) if clicked else 0
+    conv_start_to_paid = (stats['paid_users'] /
+                          started * 100) if started else 0
+
+    # Follow-up конверсия
+    followup_users = stats.get('followup_users', 0) or 1
+    followup_conv = (stats.get('paid_after_followup', 0) /
+                     followup_users * 100) if followup_users else 0
+
+    # Детализация по типам follow-up
+    followup_by_type = stats.get('followup_by_type', {})
+    only_start_sent = followup_by_type.get('only_start', 0)
+    clicked_payment_sent = followup_by_type.get('clicked_payment', 0)
+
     await message.answer(
-        "📊 <b>Статистика</b>\n\n"
-        f"📝 Кастомных рецептов: {len(custom_recipes)}\n"
-        f"📋 Калорийностей в базе: {len(RECIPES)}\n"
-        f"📅 Всего дней рационов: {sum(len(days) for days in RECIPES.values())}",
+        "📊 <b>Статистика бота</b>\n\n"
+
+        "👥 <b>Пользователи:</b>\n"
+        f"├ Всего: <b>{stats['total_users']}</b>\n"
+        f"├ 💰 Оплатили: <b>{stats['paid_users']}</b>\n"
+        f"├ ⏳ Ожидают проверки: {stats['pending_payments']}\n"
+        f"└ 📅 Новых за 7 дней: {stats['new_users_7d']}\n\n"
+
+        "📈 <b>Воронка конверсии:</b>\n"
+        f"├ /start: <b>{stats['started_users']}</b>\n"
+        f"├ → Нажали «Я оплатила»: {stats['clicked_payment_btn']} ({conv_start_to_click:.1f}%)\n"
+        f"├ → Прислали скрин: {stats['sent_screenshot']} ({conv_click_to_screen:.1f}%)\n"
+        f"└ → Оплатили: {stats['paid_users']} ({conv_start_to_paid:.1f}%)\n\n"
+
+        "🔍 <b>Потерянные клиенты:</b>\n"
+        f"├ 😴 Только /start (ничего не делали): <b>{stats['only_start']}</b>\n"
+        f"└ 🤔 Нажали оплату, но без скрина: <b>{stats['clicked_but_no_screenshot']}</b>\n\n"
+
+        "📬 <b>Follow-up напоминания:</b>\n"
+        f"├ 📤 Отправлено всего: {stats.get('followup_sent', 0)}\n"
+        f"│   ├ «Только /start»: {only_start_sent}\n"
+        f"│   └ «Нажали оплату»: {clicked_payment_sent}\n"
+        f"├ 👤 Получили: {stats.get('followup_users', 0)} чел.\n"
+        f"├ ✅ Оплатили после: <b>{stats.get('paid_after_followup', 0)}</b> ({followup_conv:.1f}%)\n"
+        f"└ ❌ Проигнорировали: {stats.get('ignored_followup', 0)}\n\n"
+
+        "📝 <b>Контент:</b>\n"
+        f"├ Кастомных рецептов: {len(custom_recipes)}\n"
+        f"├ Калорийностей в базе: {len(RECIPES)}\n"
+        f"└ Всего дней рационов: {sum(len(days) for days in RECIPES.values())}",
         parse_mode=ParseMode.HTML
     )
+
+
+@router.message(F.text == "📬 Отправить недельный отчёт")
+async def send_weekly_report_manually(message: Message, bot: Bot):
+    """Ручная отправка недельного отчёта в админ-чат"""
+    if not is_admin(message.from_user.username):
+        return
+
+    if not ADMIN_CHANNEL_ID:
+        await message.answer("❌ ADMIN_CHANNEL_ID не настроен в .env")
+        return
+
+    await message.answer("⏳ Формирую отчёт...")
+
+    try:
+        report = await db.get_weekly_report()
+
+        # Рассчитываем конверсии за неделю
+        started = report['started_week'] or 1
+        clicked = report['clicked_payment_week'] or 1
+
+        conv_start_to_click = (
+            report['clicked_payment_week'] / started * 100) if started else 0
+        conv_click_to_screen = (
+            report['screenshot_week'] / clicked * 100) if clicked else 0
+        conv_start_to_paid = (
+            report['paid_week'] / started * 100) if started else 0
+
+        # Follow-up конверсия
+        followup_sent = report['followup_sent_week'] or 1
+        followup_conv = (report['paid_after_followup_week'] /
+                         followup_sent * 100) if followup_sent else 0
+
+        # Формируем строку с топ днями
+        weekday_stats = report.get('payments_by_weekday', {})
+        if weekday_stats:
+            weekday_str = " | ".join(
+                [f"{day}: {cnt}" for day, cnt in weekday_stats.items()])
+        else:
+            weekday_str = "Нет данных"
+
+        # Формируем сообщение
+        message_text = (
+            "📊 <b>НЕДЕЛЬНЫЙ ОТЧЁТ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "📈 <b>Общая статистика:</b>\n"
+            f"├ 👥 Всего пользователей: <b>{report['total_users']}</b>\n"
+            f"└ 💰 Всего оплатили: <b>{report['total_paid']}</b>\n\n"
+
+            "📅 <b>За эту неделю:</b>\n"
+            f"├ 🆕 Новых пользователей: <b>{report['new_users_week']}</b>\n"
+            f"├ 💳 Оплатили: <b>{report['paid_week']}</b>\n"
+            f"├ ✅ Одобрено запросов: {report['approved_week']}\n"
+            f"├ ❌ Отклонено запросов: {report['rejected_week']}\n"
+            f"└ ⏳ Ожидают проверки: {report['pending_now']}\n\n"
+
+            "📊 <b>Воронка за неделю:</b>\n"
+            f"├ /start: <b>{report['started_week']}</b>\n"
+            f"├ → Нажали «Оплатила»: {report['clicked_payment_week']} ({conv_start_to_click:.1f}%)\n"
+            f"├ → Прислали скрин: {report['screenshot_week']} ({conv_click_to_screen:.1f}%)\n"
+            f"└ → Оплатили: {report['paid_week']} ({conv_start_to_paid:.1f}%)\n\n"
+
+            "📬 <b>Follow-up за неделю:</b>\n"
+            f"├ 📤 Отправлено: {report['followup_sent_week']}\n"
+            f"└ ✅ Оплатили после: {report['paid_after_followup_week']} ({followup_conv:.1f}%)\n\n"
+
+            "🔍 <b>Потерянные клиенты (всего):</b>\n"
+            f"├ 😴 Только /start: {report['only_start_total']}\n"
+            f"└ 🤔 Нажали оплату без скрина: {report['clicked_no_screenshot_total']}\n\n"
+
+            "📊 <b>Калькулятор за неделю:</b>\n"
+            f"└ Прошли: {report['calculator_completed_week']}\n\n"
+
+            f"📅 <b>Оплаты по дням:</b> {weekday_str}\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 <i>Отчёт сформирован вручную</i>"
+        )
+
+        await bot.send_message(
+            chat_id=ADMIN_CHANNEL_ID,
+            text=message_text,
+            parse_mode=ParseMode.HTML
+        )
+
+        await message.answer(
+            "✅ Недельный отчёт отправлен в админ-чат!",
+            reply_markup=get_admin_main_menu()
+        )
+        logger.info(
+            f"Weekly report sent manually by {message.from_user.username}")
+
+    except Exception as e:
+        logger.error(f"Failed to send weekly report manually: {e}")
+        await message.answer(
+            f"❌ Ошибка при отправке отчёта:\n<code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_main_menu()
+        )
 
 
 @router.message(F.text == "🔙 Выйти из админки")
@@ -413,7 +563,8 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
     user_id = callback_data.user_id
     request_id = callback_data.request_id
 
-    logger.info(f"Admin {callback.from_user.id} approving payment: user_id={user_id}, request_id={request_id}")
+    logger.info(
+        f"Admin {callback.from_user.id} approving payment: user_id={user_id}, request_id={request_id}")
 
     # Получаем информацию о запросе
     request = await db.get_payment_request(request_id)
@@ -426,7 +577,8 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
         return
 
     if request['status'] != 'pending':
-        logger.info(f"Payment request {request_id} already processed: status={request['status']}")
+        logger.info(
+            f"Payment request {request_id} already processed: status={request['status']}")
         await callback.answer(
             f"⚠️ Этот запрос уже обработан!\nСтатус: {request['status']}",
             show_alert=True
@@ -438,6 +590,10 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
     # Обновляем статус оплаты пользователя
     await db.set_payment_status(user_id, True)
     await db.update_payment_request(request_id, 'approved')
+
+    # Логируем событие и отменяем все pending follow-up сообщения
+    await db.log_event(user_id, EventType.PAYMENT_APPROVED, f"approved_by:{callback.from_user.id}")
+    await db.cancel_user_followups(user_id)
 
     # Получаем информацию о пользователе
     user = await db.get_user(user_id)
@@ -453,8 +609,9 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
     # Обновляем сообщение в админском канале
     # Проверяем, это фото (со скриншотом) или текстовое сообщение
     original_text = callback.message.caption or callback.message.text or ""
-    new_text = original_text + f"\n\n✅ <b>ОДОБРЕНО</b>\n👤 Обработал: {admin_display}"
-    
+    new_text = original_text + \
+        f"\n\n✅ <b>ОДОБРЕНО</b>\n👤 Обработал: {admin_display}"
+
     if callback.message.photo:
         # Сообщение с фото - редактируем caption
         await callback.message.edit_caption(
@@ -530,6 +687,9 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
     # Обновляем статус запроса
     await db.update_payment_request(request_id, 'rejected')
 
+    # Логируем событие отклонения
+    await db.log_event(user_id, EventType.PAYMENT_REJECTED, f"rejected_by:{callback.from_user.id}")
+
     # Получаем информацию о пользователе
     user = await db.get_user(user_id)
 
@@ -544,8 +704,9 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
     # Обновляем сообщение в админском канале
     # Проверяем, это фото (со скриншотом) или текстовое сообщение
     original_text = callback.message.caption or callback.message.text or ""
-    new_text = original_text + f"\n\n❌ <b>ОТКЛОНЕНО</b>\n👤 Обработал: {admin_display}"
-    
+    new_text = original_text + \
+        f"\n\n❌ <b>ОТКЛОНЕНО</b>\n👤 Обработал: {admin_display}"
+
     if callback.message.photo:
         # Сообщение с фото - редактируем caption
         await callback.message.edit_caption(
