@@ -38,14 +38,20 @@ bot_instance: Bot = None
 
 async def task_process_followups():
     """Задача: отправка запланированных follow-up сообщений"""
-    if bot_instance:
-        await process_pending_followups(bot_instance)
+    try:
+        if bot_instance:
+            await process_pending_followups(bot_instance)
+    except Exception as e:
+        logger.error(f"Error in task_process_followups: {e}")
 
 
 async def task_schedule_followups():
     """Задача: поиск новых пользователей для follow-up"""
-    if bot_instance:
-        await schedule_new_followups(bot_instance)
+    try:
+        if bot_instance:
+            await schedule_new_followups(bot_instance)
+    except Exception as e:
+        logger.error(f"Error in task_schedule_followups: {e}")
 
 
 async def task_send_weekly_report():
@@ -135,8 +141,9 @@ async def task_send_weekly_report():
 
 async def on_startup(bot: Bot):
     """Действия при запуске бота"""
+    # БД уже инициализирована в main(), но вызываем снова на всякий случай
+    # (CREATE TABLE IF NOT EXISTS безопасен)
     await db.init_db()
-    logger.info("Database initialized")
 
     bot_info = await bot.get_me()
     logger.info(f"Bot started: @{bot_info.username}")
@@ -182,6 +189,10 @@ async def main():
     logger.info("Starting bot...")
 
     try:
+        # Инициализируем БД ДО запуска scheduler (чтобы таблицы существовали)
+        await db.init_db()
+        logger.info("Database initialized")
+
         # Удаляем вебхук (на случай если был) и пропускаем накопившиеся апдейты
         await bot_instance.delete_webhook(drop_pending_updates=True)
 
