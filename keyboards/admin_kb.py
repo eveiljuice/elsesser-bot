@@ -7,7 +7,8 @@ from keyboards.callbacks import (
     AdminCaloriesCallback,
     AdminDayCallback,
     AdminMealCallback,
-    AdminEditCallback
+    AdminEditCallback,
+    StatsDetailCallback
 )
 from data.recipes import RECIPES
 
@@ -146,3 +147,36 @@ def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.button(text="❌ Отмена")
     return builder.as_markup(resize_keyboard=True)
+
+
+def get_stats_detail_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для просмотра детальной статистики по пользователям"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="💰 Оплатили",
+        callback_data=StatsDetailCallback(status_type="paid")
+    )
+    builder.button(
+        text="⏳ Ожидают проверки",
+        callback_data=StatsDetailCallback(status_type="pending")
+    )
+    builder.button(
+        text="❌ Отклонены",
+        callback_data=StatsDetailCallback(status_type="rejected")
+    )
+    builder.button(
+        text="😴 Только /start",
+        callback_data=StatsDetailCallback(status_type="only_start")
+    )
+    builder.button(
+        text="🤔 Нажали оплату без скрина",
+        callback_data=StatsDetailCallback(status_type="clicked_no_screenshot")
+    )
+    builder.button(
+        text="👥 Все пользователи",
+        callback_data=StatsDetailCallback(status_type="all_users")
+    )
+    
+    builder.adjust(2)
+    return builder.as_markup()

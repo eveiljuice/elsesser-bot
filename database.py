@@ -760,3 +760,101 @@ async def get_weekly_report() -> Dict:
             }
         
         return report
+
+
+async def get_users_by_status(status_type: str) -> List[Dict]:
+    """
+    Получить список пользователей по статусу для детальной статистики
+    
+    status_type:
+    - 'paid': оплатившие пользователи
+    - 'pending': ожидают проверки оплаты
+    - 'rejected': отклонённые заявки
+    - 'only_start': только нажали /start (ничего не делали)
+    - 'clicked_no_screenshot': нажали оплату, но не прислали скрин
+    - 'all_users': все пользователи
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        if status_type == 'paid':
+            # Оплатившие пользователи
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, created_at
+                FROM users
+                WHERE has_paid = 1
+                ORDER BY payment_request_date DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif status_type == 'pending':
+            # Пользователи с pending запросами на оплату
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name, u.has_paid, u.created_at
+                FROM users u
+                JOIN payment_requests pr ON u.user_id = pr.user_id
+                WHERE pr.status = 'pending'
+                ORDER BY pr.created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif status_type == 'rejected':
+            # Пользователи с отклонёнными запросами
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name, u.has_paid, u.created_at,
+                       pr.created_at as request_date
+                FROM users u
+                JOIN payment_requests pr ON u.user_id = pr.user_id
+                WHERE pr.status = 'rejected'
+                ORDER BY pr.created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif status_type == 'only_start':
+            # Пользователи, которые только нажали /start (ничего не делали)
+            async with db.execute('''
+                SELECT u.user_id, u.username, u.first_name, u.has_paid, u.created_at
+                FROM users u
+                WHERE u.has_paid = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e 
+                    WHERE e.user_id = u.user_id 
+                    AND e.event_type IN (?, ?, ?)
+                )
+                ORDER BY u.created_at DESC
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif status_type == 'clicked_no_screenshot':
+            # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name, u.has_paid, u.created_at,
+                       e.created_at as event_date
+                FROM users u
+                JOIN user_events e ON u.user_id = e.user_id
+                WHERE e.event_type = ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e2
+                    WHERE e2.user_id = u.user_id
+                    AND e2.event_type = ?
+                )
+                ORDER BY e.created_at DESC
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif status_type == 'all_users':
+            # Все пользователи
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, created_at
+                FROM users
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        return []

@@ -92,3 +92,8 @@ class CalcNavCallback(CallbackData, prefix="calc_nav"):
 class CalcStartCallback(CallbackData, prefix="calc_start"):
     """Callback для запуска калькулятора"""
     pass
+
+
+class StatsDetailCallback(CallbackData, prefix="stats_detail"):
+    """Callback для показа детальной статистики по пользователям"""
+    status_type: str  # paid / pending / rejected / only_start / clicked_no_screenshot / all_users

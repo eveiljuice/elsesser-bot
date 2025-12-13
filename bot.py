@@ -15,6 +15,7 @@ from config import BOT_TOKEN, ADMIN_CHANNEL_ID
 import database as db
 from handlers import user_router, admin_router, calculator_router
 from followup import process_pending_followups, schedule_new_followups
+from keyboards.admin_kb import get_stats_detail_keyboard
 
 
 # Настройка логирования
@@ -125,12 +126,14 @@ async def task_send_weekly_report():
             f"📅 <b>Оплаты по дням:</b> {weekday_str}\n\n"
 
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🤖 <i>Отчёт сформирован автоматически</i>"
+            "🤖 <i>Отчёт сформирован автоматически</i>\n\n"
+            "👇 <b>Нажмите кнопку ниже для просмотра списков пользователей</b>"
         )
 
         await bot_instance.send_message(
             chat_id=ADMIN_CHANNEL_ID,
             text=message_text,
+            reply_markup=get_stats_detail_keyboard(),
             parse_mode="HTML"
         )
         logger.info("Weekly report sent successfully")

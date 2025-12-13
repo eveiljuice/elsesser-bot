@@ -16,7 +16,8 @@ from keyboards.callbacks import (
     AdminCaloriesCallback,
     AdminDayCallback,
     AdminMealCallback,
-    AdminEditCallback
+    AdminEditCallback,
+    StatsDetailCallback
 )
 from keyboards.user_kb import get_main_menu
 from keyboards.calculator_kb import get_start_calculator_keyboard
@@ -27,7 +28,8 @@ from keyboards.admin_kb import (
     get_admin_days_keyboard,
     get_admin_meals_keyboard,
     get_admin_edit_keyboard,
-    get_cancel_keyboard
+    get_cancel_keyboard,
+    get_stats_detail_keyboard
 )
 from data.recipes import RECIPES, get_recipe_from_db
 
@@ -210,7 +212,10 @@ async def show_stats(message: Message):
         "📝 <b>Контент:</b>\n"
         f"├ Кастомных рецептов: {len(custom_recipes)}\n"
         f"├ Калорийностей в базе: {len(RECIPES)}\n"
-        f"└ Всего дней рационов: {sum(len(days) for days in RECIPES.values())}",
+        f"└ Всего дней рационов: {sum(len(days) for days in RECIPES.values())}\n\n"
+        
+        "👇 <b>Нажмите кнопку ниже для просмотра списков пользователей</b>",
+        reply_markup=get_stats_detail_keyboard(),
         parse_mode=ParseMode.HTML
     )
 
@@ -290,12 +295,14 @@ async def send_weekly_report_manually(message: Message, bot: Bot):
             f"📅 <b>Оплаты по дням:</b> {weekday_str}\n\n"
 
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🤖 <i>Отчёт сформирован вручную</i>"
+            "🤖 <i>Отчёт сформирован вручную</i>\n\n"
+            "👇 <b>Нажмите кнопку ниже для просмотра списков пользователей</b>"
         )
 
         await bot.send_message(
             chat_id=ADMIN_CHANNEL_ID,
             text=message_text,
+            reply_markup=get_stats_detail_keyboard(),
             parse_mode=ParseMode.HTML
         )
 
@@ -747,3 +754,89 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
         return
 
     await callback.answer("❌ Оплата отклонена")
+
+
+# ==================== Detailed Statistics ====================
+
+@router.callback_query(StatsDetailCallback.filter())
+async def show_detailed_users(callback: CallbackQuery, callback_data: StatsDetailCallback):
+    """Показать детальный список пользователей по статусу"""
+    if not is_admin(callback.from_user.username):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    status_type = callback_data.status_type
+    
+    # Получаем пользователей по статусу
+    users = await db.get_users_by_status(status_type)
+    
+    # Названия для разных статусов
+    status_titles = {
+        "paid": "💰 Оплатили",
+        "pending": "⏳ Ожидают проверки",
+        "rejected": "❌ Отклонены",
+        "only_start": "😴 Только /start",
+        "clicked_no_screenshot": "🤔 Нажали оплату без скрина",
+        "all_users": "👥 Все пользователи"
+    }
+    
+    title = status_titles.get(status_type, "Пользователи")
+    
+    if not users:
+        await callback.answer(
+            f"📭 {title}: список пуст",
+            show_alert=True
+        )
+        return
+    
+    # Формируем список пользователей
+    user_lines = []
+    for user in users:
+        username = user.get('username')
+        first_name = user.get('first_name', 'Без имени')
+        user_id = user.get('user_id')
+        
+        # Формируем ссылку на пользователя
+        if username:
+            user_display = f"@{username}"
+        else:
+            user_display = f'<a href="tg://user?id={user_id}">{first_name}</a>'
+        
+        user_lines.append(user_display)
+    
+    # Делим на части если список слишком большой (Telegram лимит ~4096 символов)
+    max_users_per_message = 100
+    total_users = len(user_lines)
+    
+    if total_users <= max_users_per_message:
+        # Все помещается в одно сообщение
+        users_text = "\n".join(user_lines)
+        message_text = (
+            f"<b>{title}</b>\n"
+            f"Всего: {total_users}\n\n"
+            f"{users_text}"
+        )
+        
+        await callback.message.answer(
+            message_text,
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        # Разбиваем на несколько сообщений
+        chunks = [user_lines[i:i + max_users_per_message] 
+                  for i in range(0, total_users, max_users_per_message)]
+        
+        for idx, chunk in enumerate(chunks, 1):
+            users_text = "\n".join(chunk)
+            message_text = (
+                f"<b>{title}</b> (часть {idx}/{len(chunks)})\n"
+                f"Всего: {total_users}\n\n"
+                f"{users_text}"
+            )
+            
+            await callback.message.answer(
+                message_text,
+                parse_mode=ParseMode.HTML
+            )
+    
+    await callback.answer()
