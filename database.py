@@ -29,20 +29,39 @@ async def init_db():
                 username TEXT,
                 first_name TEXT,
                 has_paid INTEGER DEFAULT 0,
+                has_paid_fmd INTEGER DEFAULT 0,
                 payment_request_date TEXT,
+                fmd_payment_request_date TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Миграция: добавляем поля для FMD если их нет
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN has_paid_fmd INTEGER DEFAULT 0')
+        except:
+            pass  # Колонка уже существует
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN fmd_payment_request_date TEXT')
+        except:
+            pass  # Колонка уже существует
         await db.execute('''
             CREATE TABLE IF NOT EXISTS payment_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 status TEXT CHECK(status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
                 admin_message_id INTEGER,
+                product_type TEXT DEFAULT 'main',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
+        
+        # Миграция: добавляем product_type если его нет
+        try:
+            await db.execute("ALTER TABLE payment_requests ADD COLUMN product_type TEXT DEFAULT 'main'")
+        except:
+            pass  # Колонка уже существует
         # Таблица для хранения рецептов (редактируемых через админку)
         await db.execute('''
             CREATE TABLE IF NOT EXISTS recipes (
@@ -118,6 +137,69 @@ async def init_db():
             ON followup_messages(status, scheduled_at)
         ''')
         
+        # ==================== Таблица рассылок ====================
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                audience TEXT NOT NULL CHECK(audience IN ('all', 'start_only', 'rejected', 'no_screenshot')),
+                scheduled_at TEXT NOT NULL,
+                status TEXT CHECK(status IN ('pending', 'sending', 'sent', 'cancelled')) DEFAULT 'pending',
+                created_by INTEGER NOT NULL,
+                created_by_username TEXT,
+                sent_count INTEGER DEFAULT 0,
+                failed_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                sent_at TEXT
+            )
+        ''')
+        
+        # Индекс для поиска pending рассылок
+        await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_broadcasts_pending 
+            ON broadcasts(status, scheduled_at)
+        ''')
+        
+        # ==================== Таблица шаблонов рассылок ====================
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS broadcast_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                content TEXT NOT NULL,
+                created_by INTEGER NOT NULL,
+                created_by_username TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # ==================== Таблица автоматических рассылок ====================
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS auto_broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trigger_type TEXT NOT NULL CHECK(trigger_type IN ('only_start', 'no_payment', 'rejected', 'no_screenshot')),
+                content TEXT NOT NULL,
+                delay_hours INTEGER NOT NULL DEFAULT 24,
+                is_active INTEGER DEFAULT 1,
+                created_by INTEGER NOT NULL,
+                created_by_username TEXT,
+                sent_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица для отслеживания уже отправленных авто-рассылок
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS auto_broadcast_sent (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auto_broadcast_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(auto_broadcast_id, user_id),
+                FOREIGN KEY(auto_broadcast_id) REFERENCES auto_broadcasts(id),
+                FOREIGN KEY(user_id) REFERENCES users(user_id)
+            )
+        ''')
+        
         await db.commit()
 
 
@@ -146,7 +228,7 @@ async def get_user(user_id: int) -> Optional[dict]:
 
 
 async def check_payment_status(user_id: int) -> bool:
-    """Проверить статус оплаты пользователя"""
+    """Проверить статус оплаты пользователя (основной рацион)"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         async with db.execute(
             'SELECT has_paid FROM users WHERE user_id = ?', (user_id,)
@@ -156,7 +238,7 @@ async def check_payment_status(user_id: int) -> bool:
 
 
 async def set_payment_status(user_id: int, status: bool):
-    """Установить статус оплаты пользователя"""
+    """Установить статус оплаты пользователя (основной рацион)"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         await db.execute(
             'UPDATE users SET has_paid = ? WHERE user_id = ?',
@@ -165,19 +247,48 @@ async def set_payment_status(user_id: int, status: bool):
         await db.commit()
 
 
-async def create_payment_request(user_id: int, admin_message_id: int) -> int:
-    """Создать запрос на оплату, вернуть ID запроса"""
+async def check_fmd_payment_status(user_id: int) -> bool:
+    """Проверить статус оплаты FMD протокола"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute(
+            'SELECT has_paid_fmd FROM users WHERE user_id = ?', (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
+
+
+async def set_fmd_payment_status(user_id: int, status: bool):
+    """Установить статус оплаты FMD протокола"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        await db.execute(
+            'UPDATE users SET has_paid_fmd = ? WHERE user_id = ?',
+            (1 if status else 0, user_id)
+        )
+        await db.commit()
+
+
+async def create_payment_request(user_id: int, admin_message_id: int, product_type: str = 'main') -> int:
+    """Создать запрос на оплату, вернуть ID запроса
+    
+    product_type: 'main' - основной рацион, 'fmd' - FMD протокол
+    """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         # Обновляем дату запроса у пользователя
-        await db.execute(
-            'UPDATE users SET payment_request_date = ? WHERE user_id = ?',
-            (datetime.now().isoformat(), user_id)
-        )
+        if product_type == 'fmd':
+            await db.execute(
+                'UPDATE users SET fmd_payment_request_date = ? WHERE user_id = ?',
+                (datetime.now().isoformat(), user_id)
+            )
+        else:
+            await db.execute(
+                'UPDATE users SET payment_request_date = ? WHERE user_id = ?',
+                (datetime.now().isoformat(), user_id)
+            )
         # Создаём запрос
         cursor = await db.execute('''
-            INSERT INTO payment_requests (user_id, admin_message_id, status)
-            VALUES (?, ?, 'pending')
-        ''', (user_id, admin_message_id))
+            INSERT INTO payment_requests (user_id, admin_message_id, status, product_type)
+            VALUES (?, ?, 'pending', ?)
+        ''', (user_id, admin_message_id, product_type))
         await db.commit()
         return cursor.lastrowid
 
@@ -203,15 +314,26 @@ async def update_payment_request(request_id: int, status: str):
         await db.commit()
 
 
-async def has_pending_request(user_id: int) -> bool:
-    """Проверить, есть ли у пользователя необработанный запрос"""
+async def has_pending_request(user_id: int, product_type: str = None) -> bool:
+    """Проверить, есть ли у пользователя необработанный запрос
+    
+    product_type: None - любой продукт, 'main' - основной рацион, 'fmd' - FMD протокол
+    """
     async with aiosqlite.connect(DATABASE_NAME) as db:
-        async with db.execute(
-            "SELECT COUNT(*) FROM payment_requests WHERE user_id = ? AND status = 'pending'",
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row[0] > 0 if row else False
+        if product_type:
+            async with db.execute(
+                "SELECT COUNT(*) FROM payment_requests WHERE user_id = ? AND status = 'pending' AND product_type = ?",
+                (user_id, product_type)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] > 0 if row else False
+        else:
+            async with db.execute(
+                "SELECT COUNT(*) FROM payment_requests WHERE user_id = ? AND status = 'pending'",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] > 0 if row else False
 
 
 # ==================== Recipes ====================
@@ -854,6 +976,430 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
                 FROM users
                 ORDER BY created_at DESC
             ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        return []
+
+
+# ==================== Broadcast Management ====================
+
+async def create_broadcast(
+    content: str,
+    audience: str,
+    scheduled_at: datetime,
+    created_by: int,
+    created_by_username: str = None
+) -> int:
+    """Создать новую рассылку, вернуть ID"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO broadcasts (content, audience, scheduled_at, created_by, created_by_username, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        ''', (content, audience, scheduled_at.isoformat(), created_by, created_by_username, datetime.now().isoformat()))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_broadcast(broadcast_id: int) -> Optional[Dict]:
+    """Получить информацию о рассылке"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            'SELECT * FROM broadcasts WHERE id = ?', (broadcast_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_pending_broadcasts() -> List[Dict]:
+    """Получить все pending рассылки, которые пора отправить"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.now().isoformat()
+        async with db.execute('''
+            SELECT * FROM broadcasts
+            WHERE status = 'pending'
+            AND scheduled_at <= ?
+            ORDER BY scheduled_at ASC
+        ''', (now,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_scheduled_broadcasts() -> List[Dict]:
+    """Получить все запланированные рассылки для отображения в админке"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM broadcasts
+            WHERE status = 'pending'
+            ORDER BY scheduled_at ASC
+        ''') as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def update_broadcast_status(broadcast_id: int, status: str, sent_count: int = 0, failed_count: int = 0):
+    """Обновить статус рассылки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        if status == 'sent':
+            await db.execute('''
+                UPDATE broadcasts 
+                SET status = ?, sent_count = ?, failed_count = ?, sent_at = ?
+                WHERE id = ?
+            ''', (status, sent_count, failed_count, datetime.now().isoformat(), broadcast_id))
+        else:
+            await db.execute('''
+                UPDATE broadcasts 
+                SET status = ?
+                WHERE id = ?
+            ''', (status, broadcast_id))
+        await db.commit()
+
+
+async def cancel_broadcast(broadcast_id: int) -> bool:
+    """Отменить рассылку (только если pending)"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            UPDATE broadcasts 
+            SET status = 'cancelled'
+            WHERE id = ? AND status = 'pending'
+        ''', (broadcast_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_broadcast_audience_users(audience: str) -> List[Dict]:
+    """
+    Получить пользователей для рассылки по типу аудитории
+    
+    audience:
+    - 'all': все пользователи
+    - 'start_only': только нажали /start (ничего не делали)
+    - 'rejected': с отклонёнными заявками
+    - 'no_screenshot': нажали оплату, но не прислали скрин
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        if audience == 'all':
+            # Все пользователи
+            async with db.execute('''
+                SELECT user_id, username, first_name
+                FROM users
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif audience == 'start_only':
+            # Пользователи, которые только нажали /start (ничего не делали)
+            async with db.execute('''
+                SELECT u.user_id, u.username, u.first_name
+                FROM users u
+                WHERE u.has_paid = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e 
+                    WHERE e.user_id = u.user_id 
+                    AND e.event_type IN (?, ?, ?)
+                )
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif audience == 'rejected':
+            # Пользователи с отклонёнными запросами (и не оплатившие после)
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name
+                FROM users u
+                JOIN payment_requests pr ON u.user_id = pr.user_id
+                WHERE pr.status = 'rejected'
+                AND u.has_paid = 0
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif audience == 'no_screenshot':
+            # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name
+                FROM users u
+                JOIN user_events e ON u.user_id = e.user_id
+                WHERE e.event_type = ?
+                AND u.has_paid = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e2
+                    WHERE e2.user_id = u.user_id
+                    AND e2.event_type = ?
+                )
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        return []
+
+
+async def get_broadcast_audience_count(audience: str) -> int:
+    """Получить количество пользователей для аудитории рассылки"""
+    users = await get_broadcast_audience_users(audience)
+    return len(users)
+
+
+# ==================== Template Management ====================
+
+async def create_template(
+    content: str,
+    created_by: int,
+    created_by_username: str = None,
+    name: str = None
+) -> int:
+    """Создать шаблон рассылки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO broadcast_templates (name, content, created_by, created_by_username)
+            VALUES (?, ?, ?, ?)
+        ''', (name, content, created_by, created_by_username))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_templates(created_by: int = None) -> List[Dict]:
+    """Получить все шаблоны (или только конкретного пользователя)"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        if created_by:
+            async with db.execute('''
+                SELECT * FROM broadcast_templates 
+                WHERE created_by = ?
+                ORDER BY created_at DESC
+            ''', (created_by,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        else:
+            async with db.execute('''
+                SELECT * FROM broadcast_templates 
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+
+async def get_template(template_id: int) -> Optional[Dict]:
+    """Получить конкретный шаблон"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM broadcast_templates WHERE id = ?
+        ''', (template_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_template(template_id: int) -> bool:
+    """Удалить шаблон"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            DELETE FROM broadcast_templates WHERE id = ?
+        ''', (template_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+# ==================== Auto-Broadcast Management ====================
+
+async def create_auto_broadcast(
+    trigger_type: str,
+    content: str,
+    delay_hours: int,
+    created_by: int,
+    created_by_username: str = None
+) -> int:
+    """Создать автоматическую рассылку"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO auto_broadcasts (trigger_type, content, delay_hours, created_by, created_by_username)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (trigger_type, content, delay_hours, created_by, created_by_username))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_auto_broadcasts(active_only: bool = False) -> List[Dict]:
+    """Получить все автоматические рассылки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        if active_only:
+            async with db.execute('''
+                SELECT * FROM auto_broadcasts 
+                WHERE is_active = 1
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        else:
+            async with db.execute('''
+                SELECT * FROM auto_broadcasts 
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+
+async def get_auto_broadcast(auto_id: int) -> Optional[Dict]:
+    """Получить конкретную автоматическую рассылку"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM auto_broadcasts WHERE id = ?
+        ''', (auto_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def toggle_auto_broadcast(auto_id: int) -> bool:
+    """Переключить активность автоматической рассылки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        # Получаем текущее состояние
+        async with db.execute('''
+            SELECT is_active FROM auto_broadcasts WHERE id = ?
+        ''', (auto_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            
+            new_status = 0 if row[0] else 1
+        
+        await db.execute('''
+            UPDATE auto_broadcasts SET is_active = ? WHERE id = ?
+        ''', (new_status, auto_id))
+        await db.commit()
+        return True
+
+
+async def delete_auto_broadcast(auto_id: int) -> bool:
+    """Удалить автоматическую рассылку"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        # Сначала удаляем записи об отправках
+        await db.execute('''
+            DELETE FROM auto_broadcast_sent WHERE auto_broadcast_id = ?
+        ''', (auto_id,))
+        
+        cursor = await db.execute('''
+            DELETE FROM auto_broadcasts WHERE id = ?
+        ''', (auto_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def increment_auto_broadcast_sent(auto_id: int) -> None:
+    """Увеличить счётчик отправок автоматической рассылки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        await db.execute('''
+            UPDATE auto_broadcasts SET sent_count = sent_count + 1 WHERE id = ?
+        ''', (auto_id,))
+        await db.commit()
+
+
+async def mark_auto_broadcast_sent(auto_id: int, user_id: int) -> bool:
+    """Отметить, что автоматическая рассылка отправлена пользователю"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        try:
+            await db.execute('''
+                INSERT INTO auto_broadcast_sent (auto_broadcast_id, user_id)
+                VALUES (?, ?)
+            ''', (auto_id, user_id))
+            await db.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            # Уже отправлено этому пользователю
+            return False
+
+
+async def is_auto_broadcast_sent(auto_id: int, user_id: int) -> bool:
+    """Проверить, была ли авто-рассылка уже отправлена пользователю"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute('''
+            SELECT 1 FROM auto_broadcast_sent 
+            WHERE auto_broadcast_id = ? AND user_id = ?
+        ''', (auto_id, user_id)) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int) -> List[Dict]:
+    """
+    Получить пользователей, подходящих для автоматической рассылки
+    
+    trigger_type:
+    - 'only_start': только нажали /start, прошло delay_hours часов
+    - 'no_payment': нажали оплатить, но не оплатили, прошло delay_hours часов
+    - 'rejected': отклонённая оплата, прошло delay_hours часов
+    - 'no_screenshot': нажали оплатить без скрина, прошло delay_hours часов
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        threshold_time = datetime.now() - timedelta(hours=delay_hours)
+        threshold_str = threshold_time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        if trigger_type == 'only_start':
+            # Пользователи, которые только нажали /start и больше ничего не делали
+            async with db.execute('''
+                SELECT u.user_id, u.username, u.first_name
+                FROM users u
+                WHERE u.has_paid = 0
+                AND u.created_at <= ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e 
+                    WHERE e.user_id = u.user_id 
+                    AND e.event_type IN (?, ?, ?)
+                )
+            ''', (threshold_str, EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif trigger_type == 'no_payment':
+            # Пользователи, которые нажали оплатить, но не оплатили
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name
+                FROM users u
+                JOIN user_events e ON u.user_id = e.user_id
+                WHERE e.event_type = ?
+                AND e.created_at <= ?
+                AND u.has_paid = 0
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, threshold_str)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif trigger_type == 'rejected':
+            # Пользователи с отклонёнными запросами
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name
+                FROM users u
+                JOIN payment_requests pr ON u.user_id = pr.user_id
+                WHERE pr.status = 'rejected'
+                AND pr.created_at <= ?
+                AND u.has_paid = 0
+            ''', (threshold_str,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif trigger_type == 'no_screenshot':
+            # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
+            async with db.execute('''
+                SELECT DISTINCT u.user_id, u.username, u.first_name
+                FROM users u
+                JOIN user_events e ON u.user_id = e.user_id
+                WHERE e.event_type = ?
+                AND e.created_at <= ?
+                AND u.has_paid = 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM user_events e2
+                    WHERE e2.user_id = u.user_id
+                    AND e2.event_type = ?
+                )
+            ''', (EventType.PAYMENT_BUTTON_CLICKED, threshold_str, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
         

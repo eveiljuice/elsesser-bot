@@ -27,6 +27,8 @@ env/
 .vscode/
 *.swp
 *.swo
+meal_days/
+.github
 
 # OS
 .DS_Store

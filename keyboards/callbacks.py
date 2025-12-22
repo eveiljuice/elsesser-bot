@@ -2,7 +2,32 @@ from aiogram.filters.callback_data import CallbackData
 
 
 class PaymentCallback(CallbackData, prefix="pay"):
-    """Callback для кнопки 'Я оплатил(а)'"""
+    """Callback для кнопки 'Я оплатил(а)' (основной рацион)"""
+    pass
+
+
+class FMDPaymentCallback(CallbackData, prefix="fmd_pay"):
+    """Callback для кнопки 'Я оплатил(а)' (FMD протокол)"""
+    pass
+
+
+class FMDDayCallback(CallbackData, prefix="fmd_day"):
+    """Callback для выбора дня FMD протокола"""
+    day: int
+
+
+class FMDInfoCallback(CallbackData, prefix="fmd_info"):
+    """Callback для показа информации о FMD"""
+    info_type: str  # 'shopping_list' или 'about'
+
+
+class ProductSelectCallback(CallbackData, prefix="product"):
+    """Callback для выбора продукта (рацион или FMD)"""
+    product: str  # 'main' или 'fmd'
+
+
+class BackToProductsCallback(CallbackData, prefix="back_products"):
+    """Callback для возврата к выбору продукта"""
     pass
 
 
@@ -11,6 +36,7 @@ class AdminCallback(CallbackData, prefix="admin"):
     action: str  # approve / reject
     user_id: int
     request_id: int
+    product_type: str = 'main'  # 'main' или 'fmd'
 
 
 class CaloriesCallback(CallbackData, prefix="cal"):
@@ -97,3 +123,82 @@ class CalcStartCallback(CallbackData, prefix="calc_start"):
 class StatsDetailCallback(CallbackData, prefix="stats_detail"):
     """Callback для показа детальной статистики по пользователям"""
     status_type: str  # paid / pending / rejected / only_start / clicked_no_screenshot / all_users
+
+
+# ==================== Broadcast Management Callbacks ====================
+
+class BroadcastMenuCallback(CallbackData, prefix="bc_menu"):
+    """Callback для меню рассылок"""
+    action: str  # list / create / back
+
+
+class BroadcastAudienceCallback(CallbackData, prefix="bc_audience"):
+    """Callback для выбора аудитории рассылки"""
+    audience: str  # all / start_only / rejected / no_screenshot
+
+
+class BroadcastConfirmCallback(CallbackData, prefix="bc_confirm"):
+    """Callback для подтверждения/отмены рассылки"""
+    action: str  # confirm / edit / cancel
+    broadcast_id: int = 0
+
+
+class BroadcastScheduleCallback(CallbackData, prefix="bc_schedule"):
+    """Callback для выбора времени отправки"""
+    action: str  # now / schedule / set_date / set_time
+    value: str = ""
+
+
+class BroadcastListCallback(CallbackData, prefix="bc_list"):
+    """Callback для списка рассылок"""
+    action: str  # view / cancel / page
+    broadcast_id: int = 0
+    page: int = 0
+
+
+# ==================== Template Management Callbacks ====================
+
+class TemplateMenuCallback(CallbackData, prefix="tpl_menu"):
+    """Callback для меню шаблонов"""
+    action: str  # list / create / back
+
+
+class TemplateSelectCallback(CallbackData, prefix="tpl_sel"):
+    """Callback для выбора шаблона"""
+    action: str  # view / use / use_auto / delete
+    template_id: int = 0
+    page: int = 0
+
+
+class TemplateSaveCallback(CallbackData, prefix="tpl_save"):
+    """Callback для сохранения рассылки как шаблона"""
+    action: str  # confirm / cancel
+
+
+# ==================== Auto-Broadcast (Trigger) Callbacks ====================
+
+class AutoBroadcastMenuCallback(CallbackData, prefix="auto_menu"):
+    """Callback для меню автоматических рассылок"""
+    action: str  # list / create / back
+
+
+class AutoBroadcastTriggerCallback(CallbackData, prefix="auto_trigger"):
+    """Callback для выбора триггера автоматической рассылки"""
+    trigger: str  # only_start / no_payment / rejected / no_screenshot
+
+
+class AutoBroadcastDelayCallback(CallbackData, prefix="auto_delay"):
+    """Callback для выбора задержки отправки"""
+    hours: int
+
+
+class AutoBroadcastConfirmCallback(CallbackData, prefix="auto_confirm"):
+    """Callback для подтверждения автоматической рассылки"""
+    action: str  # confirm / edit / cancel
+
+
+class AutoBroadcastListCallback(CallbackData, prefix="auto_list"):
+    """Callback для списка автоматических рассылок"""
+    action: str  # view / toggle / delete
+    auto_id: int = 0
+    page: int = 0

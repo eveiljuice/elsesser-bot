@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from config import BOT_TOKEN, ADMIN_CHANNEL_ID
 import database as db
 from handlers import user_router, admin_router, calculator_router
-from followup import process_pending_followups, schedule_new_followups
+from followup import process_pending_followups, schedule_new_followups, process_pending_broadcasts, process_auto_broadcasts
 from keyboards.admin_kb import get_stats_detail_keyboard
 
 
@@ -53,6 +53,24 @@ async def task_schedule_followups():
             await schedule_new_followups(bot_instance)
     except Exception as e:
         logger.error(f"Error in task_schedule_followups: {e}")
+
+
+async def task_process_broadcasts():
+    """Задача: отправка запланированных рассылок"""
+    try:
+        if bot_instance:
+            await process_pending_broadcasts(bot_instance)
+    except Exception as e:
+        logger.error(f"Error in task_process_broadcasts: {e}")
+
+
+async def task_process_auto_broadcasts():
+    """Задача: отправка автоматических рассылок"""
+    try:
+        if bot_instance:
+            await process_auto_broadcasts(bot_instance)
+    except Exception as e:
+        logger.error(f"Error in task_process_auto_broadcasts: {e}")
 
 
 async def task_send_weekly_report():
@@ -215,7 +233,21 @@ async def main():
                 id="schedule_followups"
             )
 
-            # Задача 3: Недельный отчёт каждое воскресенье в 20:00
+            # Задача 3: Отправка запланированных рассылок (каждую минуту)
+            await scheduler.add_schedule(
+                task_process_broadcasts,
+                IntervalTrigger(minutes=1),
+                id="process_broadcasts"
+            )
+
+            # Задача 4: Отправка автоматических рассылок (каждые 5 минут)
+            await scheduler.add_schedule(
+                task_process_auto_broadcasts,
+                IntervalTrigger(minutes=5),
+                id="process_auto_broadcasts"
+            )
+
+            # Задача 5: Недельный отчёт каждое воскресенье в 20:00
             await scheduler.add_schedule(
                 task_send_weekly_report,
                 CronTrigger(day_of_week="sun", hour=20, minute=0),
