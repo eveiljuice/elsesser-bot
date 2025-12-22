@@ -4,11 +4,14 @@ Follow-up (триггерные) сообщения и рассылки для �
 import logging
 import random
 import asyncio
+import json
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import database as db
 from config import PAYMENT_AMOUNT
@@ -18,18 +21,94 @@ logger = logging.getLogger(__name__)
 
 # ==================== Broadcast System ====================
 
-async def send_broadcast_message(bot: Bot, user_id: int, content: str) -> bool:
+def parse_buttons(buttons_json: str = None) -> Optional[InlineKeyboardMarkup]:
+    """
+    Парсит JSON с кнопками и возвращает InlineKeyboardMarkup
+    
+    Формат JSON:
+    [
+        [{"text": "Кнопка 1", "url": "https://example.com"}],
+        [{"text": "Команда", "callback_data": "/start"}]
+    ]
+    """
+    if not buttons_json:
+        return None
+    
+    try:
+        buttons_data = json.loads(buttons_json)
+        if not buttons_data:
+            return None
+        
+        builder = InlineKeyboardBuilder()
+        
+        for row in buttons_data:
+            for btn in row:
+                text = btn.get('text', '')
+                url = btn.get('url')
+                callback_data = btn.get('callback_data')
+                
+                if url:
+                    builder.button(text=text, url=url)
+                elif callback_data:
+                    builder.button(text=text, callback_data=callback_data)
+            
+            # Каждая строка в отдельном ряду
+            builder.adjust(len(row))
+        
+        return builder.as_markup()
+    except Exception as e:
+        logger.error(f"Failed to parse buttons: {e}")
+        return None
+
+
+async def send_broadcast_message(
+    bot: Bot,
+    user_id: int,
+    content: str,
+    media_type: str = None,
+    media_file_id: str = None,
+    buttons: str = None
+) -> bool:
     """
     Отправить сообщение рассылки пользователю
+    
+    Поддерживает:
+    - Обычный текст
+    - Текст + медиа (фото/видео)
+    - Inline кнопки
     
     Returns: True если успешно, False если ошибка
     """
     try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=content,
-            parse_mode=ParseMode.HTML
-        )
+        # Парсим кнопки
+        reply_markup = parse_buttons(buttons)
+        
+        # Отправляем в зависимости от наличия медиа
+        if media_type == 'photo' and media_file_id:
+            await bot.send_photo(
+                chat_id=user_id,
+                photo=media_file_id,
+                caption=content,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        elif media_type == 'video' and media_file_id:
+            await bot.send_video(
+                chat_id=user_id,
+                video=media_file_id,
+                caption=content,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            # Обычное текстовое сообщение
+            await bot.send_message(
+                chat_id=user_id,
+                text=content,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        
         return True
     except Exception as e:
         logger.error(f"Failed to send broadcast to user {user_id}: {e}")
@@ -47,6 +126,9 @@ async def process_pending_broadcasts(bot: Bot):
         broadcast_id = broadcast['id']
         audience = broadcast['audience']
         content = broadcast['content']
+        media_type = broadcast.get('media_type')
+        media_file_id = broadcast.get('media_file_id')
+        buttons = broadcast.get('buttons')
         
         logger.info(f"Starting broadcast {broadcast_id} to audience '{audience}'")
         
@@ -61,7 +143,14 @@ async def process_pending_broadcasts(bot: Bot):
         
         for user in users:
             user_id = user['user_id']
-            success = await send_broadcast_message(bot, user_id, content)
+            success = await send_broadcast_message(
+                bot,
+                user_id,
+                content,
+                media_type=media_type,
+                media_file_id=media_file_id,
+                buttons=buttons
+            )
             
             if success:
                 sent_count += 1
@@ -241,6 +330,9 @@ async def process_auto_broadcasts(bot: Bot):
         trigger_type = auto_bc['trigger_type']
         delay_hours = auto_bc['delay_hours']
         content = auto_bc['content']
+        media_type = auto_bc.get('media_type')
+        media_file_id = auto_bc.get('media_file_id')
+        buttons = auto_bc.get('buttons')
         
         # Получаем пользователей, подходящих под триггер
         eligible_users = await db.get_auto_broadcast_eligible_users(trigger_type, delay_hours)
@@ -255,7 +347,14 @@ async def process_auto_broadcasts(bot: Bot):
                 continue
             
             # Отправляем сообщение
-            success = await send_broadcast_message(bot, user_id, content)
+            success = await send_broadcast_message(
+                bot,
+                user_id,
+                content,
+                media_type=media_type,
+                media_file_id=media_file_id,
+                buttons=buttons
+            )
             
             if success:
                 # Помечаем как отправленное

@@ -60,7 +60,8 @@ from keyboards.admin_kb import (
     get_auto_broadcast_delay_keyboard,
     get_auto_broadcast_confirm_keyboard,
     get_auto_broadcast_list_keyboard,
-    get_auto_broadcast_view_keyboard
+    get_auto_broadcast_view_keyboard,
+    get_skip_keyboard
 )
 from data.recipes import RECIPES, get_recipe_from_db
 
@@ -81,6 +82,8 @@ class AdminEditState(StatesGroup):
 class BroadcastState(StatesGroup):
     """Состояния для создания рассылки"""
     waiting_for_content = State()
+    waiting_for_media = State()
+    waiting_for_buttons = State()
     waiting_for_date = State()
     waiting_for_time = State()
 
@@ -88,12 +91,16 @@ class BroadcastState(StatesGroup):
 class TemplateState(StatesGroup):
     """Состояния для создания шаблона"""
     waiting_for_content = State()
+    waiting_for_media = State()
+    waiting_for_buttons = State()
     waiting_for_name = State()
 
 
 class AutoBroadcastState(StatesGroup):
     """Состояния для создания автоматической рассылки"""
     waiting_for_content = State()
+    waiting_for_media = State()
+    waiting_for_buttons = State()
 
 
 # ==================== Helpers ====================
@@ -1043,7 +1050,140 @@ async def broadcast_receive_content(message: Message, state: FSMContext):
     # Сохраняем текст в состояние
     await state.update_data(content=content)
     
+    # Спрашиваем про медиа
+    await state.set_state(BroadcastState.waiting_for_media)
     await message.answer(
+        "📸 <b>Добавление медиа (опционально)</b>\n\n"
+        "Отправьте фото или видео, которое хотите добавить к рассылке.\n\n"
+        "Или нажмите <b>Пропустить</b>, если медиа не нужно.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(BroadcastState.waiting_for_media, F.text == "⏭ Пропустить")
+async def broadcast_skip_media(message: Message, state: FSMContext):
+    """Пропуск добавления медиа"""
+    if not is_admin(message.from_user.username):
+        return
+    
+    # Переходим к кнопкам
+    await state.set_state(BroadcastState.waiting_for_buttons)
+    await message.answer(
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(BroadcastState.waiting_for_media, F.photo | F.video)
+async def broadcast_receive_media(message: Message, state: FSMContext):
+    """Получение медиа для рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+    
+    # Определяем тип медиа и file_id
+    if message.photo:
+        media_type = 'photo'
+        media_file_id = message.photo[-1].file_id  # Берём фото максимального размера
+    elif message.video:
+        media_type = 'video'
+        media_file_id = message.video.file_id
+    else:
+        await message.answer("❌ Пожалуйста, отправьте фото или видео.")
+        return
+    
+    # Сохраняем медиа в состояние
+    await state.update_data(media_type=media_type, media_file_id=media_file_id)
+    
+    # Переходим к кнопкам
+    await state.set_state(BroadcastState.waiting_for_buttons)
+    await message.answer(
+        "✅ Медиа добавлено!\n\n"
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(BroadcastState.waiting_for_buttons, F.text == "⏭ Пропустить")
+async def broadcast_skip_buttons(message: Message, state: FSMContext):
+    """Пропуск добавления кнопок"""
+    if not is_admin(message.from_user.username):
+        return
+    
+    # Получаем данные для превью
+    data = await state.get_data()
+    content = data.get('content', '')
+    
+    # Переходим к выбору аудитории
+    await message.answer(
+        "👁 <b>Превью рассылки:</b>\n\n"
+        f"{content}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 <b>Выберите аудиторию рассылки:</b>",
+        reply_markup=get_broadcast_audience_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(BroadcastState.waiting_for_buttons)
+async def broadcast_receive_buttons(message: Message, state: FSMContext):
+    """Получение кнопок для рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+    
+    import json
+    
+    # Парсим кнопки из текста
+    lines = message.text.strip().split('\n')
+    buttons_data = []
+    
+    for line in lines:
+        if '|' not in line:
+            continue
+        
+        parts = line.split('|', 1)
+        text = parts[0].strip()
+        target = parts[1].strip()
+        
+        # Определяем тип кнопки (url или callback_data)
+        if target.startswith('http://') or target.startswith('https://'):
+            buttons_data.append([{"text": text, "url": target}])
+        else:
+            buttons_data.append([{"text": text, "callback_data": target}])
+    
+    if not buttons_data:
+        await message.answer(
+            "❌ Не удалось распознать кнопки. Попробуйте ещё раз или нажмите <b>Пропустить</b>.",
+            reply_markup=get_skip_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    # Сохраняем кнопки в JSON
+    buttons_json = json.dumps(buttons_data, ensure_ascii=False)
+    await state.update_data(buttons=buttons_json)
+    
+    # Получаем данные для превью
+    data = await state.get_data()
+    content = data.get('content', '')
+    
+    # Переходим к выбору аудитории
+    await message.answer(
+        f"✅ Кнопки добавлены: {len(buttons_data)} шт.\n\n"
         "👁 <b>Превью рассылки:</b>\n\n"
         f"{content}\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1260,6 +1400,9 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
     content = data.get('content', '')
     audience = data.get('audience', 'all')
     scheduled_at = data.get('scheduled_at')
+    media_type = data.get('media_type')
+    media_file_id = data.get('media_file_id')
+    buttons = data.get('buttons')
     
     if not content or not scheduled_at:
         await callback.answer("❌ Ошибка: данные рассылки утеряны", show_alert=True)
@@ -1277,7 +1420,10 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         audience=audience,
         scheduled_at=scheduled_at_utc,
         created_by=callback.from_user.id,
-        created_by_username=callback.from_user.username
+        created_by_username=callback.from_user.username,
+        media_type=media_type,
+        media_file_id=media_file_id,
+        buttons=buttons
     )
     
     await state.clear()

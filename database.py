@@ -149,10 +149,27 @@ async def init_db():
                 created_by_username TEXT,
                 sent_count INTEGER DEFAULT 0,
                 failed_count INTEGER DEFAULT 0,
+                media_type TEXT CHECK(media_type IN ('photo', 'video', NULL)),
+                media_file_id TEXT,
+                buttons TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 sent_at TEXT
             )
         ''')
+        
+        # Миграция: добавляем поля для медиа и кнопок если их нет
+        try:
+            await db.execute('ALTER TABLE broadcasts ADD COLUMN media_type TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE broadcasts ADD COLUMN media_file_id TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE broadcasts ADD COLUMN buttons TEXT')
+        except:
+            pass
         
         # Индекс для поиска pending рассылок
         await db.execute('''
@@ -168,9 +185,26 @@ async def init_db():
                 content TEXT NOT NULL,
                 created_by INTEGER NOT NULL,
                 created_by_username TEXT,
+                media_type TEXT CHECK(media_type IN ('photo', 'video', NULL)),
+                media_file_id TEXT,
+                buttons TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Миграция: добавляем поля для медиа и кнопок если их нет
+        try:
+            await db.execute('ALTER TABLE broadcast_templates ADD COLUMN media_type TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE broadcast_templates ADD COLUMN media_file_id TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE broadcast_templates ADD COLUMN buttons TEXT')
+        except:
+            pass
         
         # ==================== Таблица автоматических рассылок ====================
         await db.execute('''
@@ -183,9 +217,26 @@ async def init_db():
                 created_by INTEGER NOT NULL,
                 created_by_username TEXT,
                 sent_count INTEGER DEFAULT 0,
+                media_type TEXT CHECK(media_type IN ('photo', 'video', NULL)),
+                media_file_id TEXT,
+                buttons TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Миграция: добавляем поля для медиа и кнопок если их нет
+        try:
+            await db.execute('ALTER TABLE auto_broadcasts ADD COLUMN media_type TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE auto_broadcasts ADD COLUMN media_file_id TEXT')
+        except:
+            pass
+        try:
+            await db.execute('ALTER TABLE auto_broadcasts ADD COLUMN buttons TEXT')
+        except:
+            pass
         
         # Таблица для отслеживания уже отправленных авто-рассылок
         await db.execute('''
@@ -989,14 +1040,17 @@ async def create_broadcast(
     audience: str,
     scheduled_at: datetime,
     created_by: int,
-    created_by_username: str = None
+    created_by_username: str = None,
+    media_type: str = None,
+    media_file_id: str = None,
+    buttons: str = None
 ) -> int:
     """Создать новую рассылку, вернуть ID"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute('''
-            INSERT INTO broadcasts (content, audience, scheduled_at, created_by, created_by_username, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
-        ''', (content, audience, scheduled_at.isoformat(), created_by, created_by_username, datetime.now().isoformat()))
+            INSERT INTO broadcasts (content, audience, scheduled_at, created_by, created_by_username, status, media_type, media_file_id, buttons, created_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        ''', (content, audience, scheduled_at.isoformat(), created_by, created_by_username, media_type, media_file_id, buttons, datetime.now().isoformat()))
         await db.commit()
         return cursor.lastrowid
 
@@ -1151,14 +1205,17 @@ async def create_template(
     content: str,
     created_by: int,
     created_by_username: str = None,
-    name: str = None
+    name: str = None,
+    media_type: str = None,
+    media_file_id: str = None,
+    buttons: str = None
 ) -> int:
     """Создать шаблон рассылки"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute('''
-            INSERT INTO broadcast_templates (name, content, created_by, created_by_username)
-            VALUES (?, ?, ?, ?)
-        ''', (name, content, created_by, created_by_username))
+            INSERT INTO broadcast_templates (name, content, created_by, created_by_username, media_type, media_file_id, buttons)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (name, content, created_by, created_by_username, media_type, media_file_id, buttons))
         await db.commit()
         return cursor.lastrowid
 
@@ -1213,14 +1270,17 @@ async def create_auto_broadcast(
     content: str,
     delay_hours: int,
     created_by: int,
-    created_by_username: str = None
+    created_by_username: str = None,
+    media_type: str = None,
+    media_file_id: str = None,
+    buttons: str = None
 ) -> int:
     """Создать автоматическую рассылку"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute('''
-            INSERT INTO auto_broadcasts (trigger_type, content, delay_hours, created_by, created_by_username)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (trigger_type, content, delay_hours, created_by, created_by_username))
+            INSERT INTO auto_broadcasts (trigger_type, content, delay_hours, created_by, created_by_username, media_type, media_file_id, buttons)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (trigger_type, content, delay_hours, created_by, created_by_username, media_type, media_file_id, buttons))
         await db.commit()
         return cursor.lastrowid
 

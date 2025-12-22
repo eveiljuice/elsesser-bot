@@ -684,3 +684,11 @@ def get_auto_broadcast_view_keyboard(auto_id: int, is_active: bool) -> InlineKey
     
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_skip_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура с кнопкой 'Пропустить'"""
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="⏭ Пропустить")
+    builder.adjust(1)
+    return builder.as_markup(resize_keyboard=True)
