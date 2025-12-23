@@ -1068,6 +1068,9 @@ async def broadcast_skip_media(message: Message, state: FSMContext):
     if not is_admin(message.from_user.username):
         return
 
+    # Очищаем медиа из состояния (если были добавлены ранее)
+    await state.update_data(media_type=None, media_file_id=None)
+    
     # Переходим к кнопкам
     await state.set_state(BroadcastState.waiting_for_buttons)
     await message.answer(
@@ -1125,6 +1128,9 @@ async def broadcast_skip_buttons(message: Message, state: FSMContext):
     """Пропуск добавления кнопок"""
     if not is_admin(message.from_user.username):
         return
+
+    # Очищаем кнопки из состояния (если были добавлены ранее)
+    await state.update_data(buttons=None)
 
     # Получаем данные для превью
     data = await state.get_data()
@@ -1408,6 +1414,17 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
 
     if not content or not scheduled_at:
         await callback.answer("❌ Ошибка: данные рассылки утеряны", show_alert=True)
+        return
+    
+    # Валидация контента перед созданием рассылки
+    from followup import validate_broadcast_content
+    is_valid, error_msg = validate_broadcast_content(content, media_type, media_file_id, buttons)
+    if not is_valid:
+        await callback.message.answer(
+            error_msg,
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer("❌ Исправьте ошибки", show_alert=True)
         return
 
     # Конвертируем в UTC для хранения в БД
@@ -2136,6 +2153,9 @@ async def auto_broadcast_skip_media(message: Message, state: FSMContext):
     if not is_admin(message.from_user.username):
         return
 
+    # Очищаем медиа из состояния (если были добавлены ранее)
+    await state.update_data(media_type=None, media_file_id=None)
+    
     # Переходим к кнопкам
     await state.set_state(AutoBroadcastState.waiting_for_buttons)
     await message.answer(
@@ -2192,6 +2212,9 @@ async def auto_broadcast_skip_buttons(message: Message, state: FSMContext):
     """Пропуск добавления кнопок для авто-рассылки"""
     if not is_admin(message.from_user.username):
         return
+
+    # Очищаем кнопки из состояния (если были добавлены ранее)
+    await state.update_data(buttons=None)
 
     # Получаем данные для превью
     data = await state.get_data()
@@ -2350,6 +2373,17 @@ async def auto_broadcast_confirm(callback: CallbackQuery, state: FSMContext):
 
     if not content or not trigger:
         await callback.answer("❌ Ошибка: данные утеряны", show_alert=True)
+        return
+    
+    # Валидация контента перед созданием авто-рассылки
+    from followup import validate_broadcast_content
+    is_valid, error_msg = validate_broadcast_content(content, media_type, media_file_id, buttons)
+    if not is_valid:
+        await callback.message.answer(
+            error_msg,
+            parse_mode=ParseMode.HTML
+        )
+        await callback.answer("❌ Исправьте ошибки", show_alert=True)
         return
 
     # Создаём авто-рассылку

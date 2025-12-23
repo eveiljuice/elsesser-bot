@@ -19,12 +19,102 @@ from config import PAYMENT_AMOUNT
 logger = logging.getLogger(__name__)
 
 
+# ==================== Validation ====================
+
+def validate_broadcast_content(
+    content: str,
+    media_type: str = None,
+    media_file_id: str = None,
+    buttons: str = None
+) -> tuple[bool, str]:
+    """
+    Валидация контента рассылки перед отправкой
+
+    Returns:
+        tuple[bool, str]: (is_valid, error_message)
+        - is_valid: True если валидация пройдена, False если есть ошибки
+        - error_message: Текст ошибки или пустая строка если всё ок
+    """
+    # Проверка длины текста
+    content_length = len(content)
+
+    # Если есть медиа (проверяем И тип И file_id), текст идёт как caption (макс 1024 символа)
+    has_media = media_type in ['photo', 'video'] and media_file_id
+
+    if has_media:
+        if content_length > 1024:
+            return False, (
+                f"❌ <b>Текст слишком длинный!</b>\n\n"
+                f"📊 Текущая длина: {content_length} символов\n"
+                f"📏 Максимум для фото/видео: 1024 символа\n"
+                f"✂️ Нужно убрать: {content_length - 1024} символов\n\n"
+                f"💡 Либо сократите текст, либо отправляйте без медиа."
+            )
+    else:
+        # Текстовое сообщение без медиа (макс 4096 символов)
+        if content_length > 4096:
+            return False, (
+                f"❌ <b>Текст слишком длинный!</b>\n\n"
+                f"📊 Текущая длина: {content_length} символов\n"
+                f"📏 Максимум: 4096 символов\n"
+                f"✂️ Нужно убрать: {content_length - 4096} символов"
+            )
+
+    # Проверка кнопок
+    if buttons:
+        try:
+            buttons_data = json.loads(buttons)
+
+            # Проверяем структуру кнопок
+            if not isinstance(buttons_data, list):
+                return False, (
+                    "❌ <b>Неверный формат кнопок!</b>\n\n"
+                    "Кнопки должны быть массивом строк."
+                )
+
+            for row_idx, row in enumerate(buttons_data, 1):
+                if not isinstance(row, list):
+                    return False, (
+                        f"❌ <b>Неверный формат строки {row_idx}!</b>\n\n"
+                        "Каждая строка кнопок должна быть массивом."
+                    )
+
+                for btn_idx, btn in enumerate(row, 1):
+                    if not isinstance(btn, dict):
+                        return False, (
+                            f"❌ <b>Неверный формат кнопки {btn_idx} в строке {row_idx}!</b>\n\n"
+                            "Каждая кнопка должна быть объектом."
+                        )
+
+                    if 'text' not in btn:
+                        return False, (
+                            f"❌ <b>Кнопка {btn_idx} в строке {row_idx} без текста!</b>\n\n"
+                            "У каждой кнопки должно быть поле 'text'."
+                        )
+
+                    if 'url' not in btn and 'callback_data' not in btn:
+                        return False, (
+                            f"❌ <b>Кнопка {btn_idx} в строке {row_idx} без действия!</b>\n\n"
+                            "У кнопки должен быть 'url' или 'callback_data'."
+                        )
+
+        except json.JSONDecodeError as e:
+            return False, (
+                "❌ <b>Неверный JSON в кнопках!</b>\n\n"
+                f"Ошибка: {str(e)}\n\n"
+                "Проверьте формат JSON."
+            )
+
+    # Если всё ок
+    return True, ""
+
+
 # ==================== Broadcast System ====================
 
 def parse_buttons(buttons_json: str = None) -> Optional[InlineKeyboardMarkup]:
     """
     Парсит JSON с кнопками и возвращает InlineKeyboardMarkup
-    
+
     Формат JSON:
     [
         [{"text": "Кнопка 1", "url": "https://example.com"}],
@@ -33,28 +123,28 @@ def parse_buttons(buttons_json: str = None) -> Optional[InlineKeyboardMarkup]:
     """
     if not buttons_json:
         return None
-    
+
     try:
         buttons_data = json.loads(buttons_json)
         if not buttons_data:
             return None
-        
+
         builder = InlineKeyboardBuilder()
-        
+
         for row in buttons_data:
             for btn in row:
                 text = btn.get('text', '')
                 url = btn.get('url')
                 callback_data = btn.get('callback_data')
-                
+
                 if url:
                     builder.button(text=text, url=url)
                 elif callback_data:
                     builder.button(text=text, callback_data=callback_data)
-            
+
             # Каждая строка в отдельном ряду
             builder.adjust(len(row))
-        
+
         return builder.as_markup()
     except Exception as e:
         logger.error(f"Failed to parse buttons: {e}")
@@ -71,18 +161,18 @@ async def send_broadcast_message(
 ) -> bool:
     """
     Отправить сообщение рассылки пользователю
-    
+
     Поддерживает:
     - Обычный текст
     - Текст + медиа (фото/видео)
     - Inline кнопки
-    
+
     Returns: True если успешно, False если ошибка
     """
     try:
         # Парсим кнопки
         reply_markup = parse_buttons(buttons)
-        
+
         # Отправляем в зависимости от наличия медиа
         if media_type == 'photo' and media_file_id:
             await bot.send_photo(
@@ -108,7 +198,7 @@ async def send_broadcast_message(
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup
             )
-        
+
         return True
     except Exception as e:
         logger.error(f"Failed to send broadcast to user {user_id}: {e}")
@@ -121,7 +211,7 @@ async def process_pending_broadcasts(bot: Bot):
     Вызывается периодически из scheduler
     """
     broadcasts = await db.get_pending_broadcasts()
-    
+
     for broadcast in broadcasts:
         broadcast_id = broadcast['id']
         audience = broadcast['audience']
@@ -129,18 +219,19 @@ async def process_pending_broadcasts(bot: Bot):
         media_type = broadcast.get('media_type')
         media_file_id = broadcast.get('media_file_id')
         buttons = broadcast.get('buttons')
-        
-        logger.info(f"Starting broadcast {broadcast_id} to audience '{audience}'")
-        
+
+        logger.info(
+            f"Starting broadcast {broadcast_id} to audience '{audience}'")
+
         # Помечаем как sending
         await db.update_broadcast_status(broadcast_id, 'sending')
-        
+
         # Получаем пользователей
         users = await db.get_broadcast_audience_users(audience)
-        
+
         sent_count = 0
         failed_count = 0
-        
+
         for user in users:
             user_id = user['user_id']
             success = await send_broadcast_message(
@@ -151,18 +242,19 @@ async def process_pending_broadcasts(bot: Bot):
                 media_file_id=media_file_id,
                 buttons=buttons
             )
-            
+
             if success:
                 sent_count += 1
             else:
                 failed_count += 1
-            
+
             # Небольшая задержка чтобы не флудить API
             await asyncio.sleep(0.05)
-        
+
         # Обновляем статус
         await db.update_broadcast_status(broadcast_id, 'sent', sent_count, failed_count)
-        logger.info(f"Broadcast {broadcast_id} completed: sent={sent_count}, failed={failed_count}")
+        logger.info(
+            f"Broadcast {broadcast_id} completed: sent={sent_count}, failed={failed_count}")
 
 
 # ==================== Шаблоны сообщений ====================
@@ -241,13 +333,13 @@ def get_random_message(message_type: str) -> str:
 async def send_followup_message(bot: Bot, user_id: int, message_type: str) -> bool:
     """
     Отправить follow-up сообщение пользователю
-    
+
     Returns: True если успешно, False если ошибка
     """
     message = get_random_message(message_type)
     if not message:
         return False
-    
+
     try:
         await bot.send_message(
             chat_id=user_id,
@@ -267,20 +359,20 @@ async def process_pending_followups(bot: Bot):
     Вызывается периодически из scheduler
     """
     followups = await db.get_pending_followups()
-    
+
     for followup in followups:
         # Пропускаем если пользователь уже оплатил
         if followup['has_paid']:
             await db.mark_followup_sent(followup['id'], 'cancelled')
             continue
-        
+
         # Отправляем сообщение
         success = await send_followup_message(
             bot,
             followup['user_id'],
             followup['message_type']
         )
-        
+
         # Обновляем статус
         status = 'sent' if success else 'failed'
         await db.mark_followup_sent(followup['id'], status)
@@ -298,8 +390,9 @@ async def schedule_new_followups(bot: Bot):
         delay_hours = random.uniform(1, 3)
         scheduled_at = datetime.now() + timedelta(hours=delay_hours)
         await db.schedule_followup(user['user_id'], 'only_start', scheduled_at)
-        logger.info(f"Scheduled 'only_start' followup for user {user['user_id']} at {scheduled_at}")
-    
+        logger.info(
+            f"Scheduled 'only_start' followup for user {user['user_id']} at {scheduled_at}")
+
     # 2. Пользователи, которые нажали "Я оплатил(а)" 2+ часа назад без скрина
     clicked_users = await db.get_users_for_followup('clicked_payment')
     for user in clicked_users:
@@ -307,7 +400,8 @@ async def schedule_new_followups(bot: Bot):
         delay_minutes = random.uniform(30, 60)
         scheduled_at = datetime.now() + timedelta(minutes=delay_minutes)
         await db.schedule_followup(user['user_id'], 'clicked_payment', scheduled_at)
-        logger.info(f"Scheduled 'clicked_payment' followup for user {user['user_id']} at {scheduled_at}")
+        logger.info(
+            f"Scheduled 'clicked_payment' followup for user {user['user_id']} at {scheduled_at}")
 
 
 # ==================== Auto-Broadcast System ====================
@@ -316,7 +410,7 @@ async def process_auto_broadcasts(bot: Bot):
     """
     Обработать все активные автоматические рассылки
     Вызывается периодически из scheduler
-    
+
     Для каждой активной авто-рассылки:
     1. Получаем пользователей, которые подходят под триггер
     2. Проверяем, не отправляли ли мы им уже эту рассылку
@@ -324,7 +418,7 @@ async def process_auto_broadcasts(bot: Bot):
     """
     # Получаем все активные авто-рассылки
     auto_broadcasts = await db.get_auto_broadcasts(active_only=True)
-    
+
     for auto_bc in auto_broadcasts:
         auto_id = auto_bc['id']
         trigger_type = auto_bc['trigger_type']
@@ -333,19 +427,19 @@ async def process_auto_broadcasts(bot: Bot):
         media_type = auto_bc.get('media_type')
         media_file_id = auto_bc.get('media_file_id')
         buttons = auto_bc.get('buttons')
-        
+
         # Получаем пользователей, подходящих под триггер
         eligible_users = await db.get_auto_broadcast_eligible_users(trigger_type, delay_hours)
-        
+
         sent_count = 0
         for user in eligible_users:
             user_id = user['user_id']
-            
+
             # Проверяем, не отправляли ли уже
             already_sent = await db.is_auto_broadcast_sent(auto_id, user_id)
             if already_sent:
                 continue
-            
+
             # Отправляем сообщение
             success = await send_broadcast_message(
                 bot,
@@ -355,17 +449,17 @@ async def process_auto_broadcasts(bot: Bot):
                 media_file_id=media_file_id,
                 buttons=buttons
             )
-            
+
             if success:
                 # Помечаем как отправленное
                 await db.mark_auto_broadcast_sent(auto_id, user_id)
                 await db.increment_auto_broadcast_sent(auto_id)
                 sent_count += 1
                 logger.info(f"Auto-broadcast {auto_id} sent to user {user_id}")
-            
+
             # Небольшая задержка
             await asyncio.sleep(0.05)
-        
-        if sent_count > 0:
-            logger.info(f"Auto-broadcast {auto_id} ({trigger_type}): sent to {sent_count} new users")
 
+        if sent_count > 0:
+            logger.info(
+                f"Auto-broadcast {auto_id} ({trigger_type}): sent to {sent_count} new users")
