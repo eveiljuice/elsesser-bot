@@ -272,7 +272,7 @@ async def show_stats(message: Message):
         f"├ Кастомных рецептов: {len(custom_recipes)}\n"
         f"├ Калорийностей в базе: {len(RECIPES)}\n"
         f"└ Всего дней рационов: {sum(len(days) for days in RECIPES.values())}\n\n"
-        
+
         "👇 <b>Нажмите кнопку ниже для просмотра списков пользователей</b>",
         reply_markup=get_stats_detail_keyboard(),
         parse_mode=ParseMode.HTML
@@ -652,14 +652,15 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
         )
         return
 
-    logger.info(f"Processing payment approval for user {user_id}, product {product_type}")
+    logger.info(
+        f"Processing payment approval for user {user_id}, product {product_type}")
 
     # Обновляем статус оплаты пользователя в зависимости от типа продукта
     if product_type == 'fmd':
         await db.set_fmd_payment_status(user_id, True)
     else:
         await db.set_payment_status(user_id, True)
-    
+
     await db.update_payment_request(request_id, 'approved')
 
     # Логируем событие и отменяем все pending follow-up сообщения
@@ -843,12 +844,12 @@ async def show_detailed_users(callback: CallbackQuery, callback_data: StatsDetai
     if not is_admin(callback.from_user.username):
         await callback.answer("⛔ Нет доступа", show_alert=True)
         return
-    
+
     status_type = callback_data.status_type
-    
+
     # Получаем пользователей по статусу
     users = await db.get_users_by_status(status_type)
-    
+
     # Названия для разных статусов
     status_titles = {
         "paid": "💰 Оплатили",
@@ -858,35 +859,35 @@ async def show_detailed_users(callback: CallbackQuery, callback_data: StatsDetai
         "clicked_no_screenshot": "🤔 Нажали оплату без скрина",
         "all_users": "👥 Все пользователи"
     }
-    
+
     title = status_titles.get(status_type, "Пользователи")
-    
+
     if not users:
         await callback.answer(
             f"📭 {title}: список пуст",
             show_alert=True
         )
         return
-    
+
     # Формируем список пользователей
     user_lines = []
     for user in users:
         username = user.get('username')
         first_name = user.get('first_name', 'Без имени')
         user_id = user.get('user_id')
-        
+
         # Формируем ссылку на пользователя
         if username:
             user_display = f"@{username}"
         else:
             user_display = f'<a href="tg://user?id={user_id}">{first_name}</a>'
-        
+
         user_lines.append(user_display)
-    
+
     # Делим на части если список слишком большой (Telegram лимит ~4096 символов)
     max_users_per_message = 100
     total_users = len(user_lines)
-    
+
     if total_users <= max_users_per_message:
         # Все помещается в одно сообщение
         users_text = "\n".join(user_lines)
@@ -895,16 +896,16 @@ async def show_detailed_users(callback: CallbackQuery, callback_data: StatsDetai
             f"Всего: {total_users}\n\n"
             f"{users_text}"
         )
-        
+
         await callback.message.answer(
             message_text,
             parse_mode=ParseMode.HTML
         )
     else:
         # Разбиваем на несколько сообщений
-        chunks = [user_lines[i:i + max_users_per_message] 
+        chunks = [user_lines[i:i + max_users_per_message]
                   for i in range(0, total_users, max_users_per_message)]
-        
+
         for idx, chunk in enumerate(chunks, 1):
             users_text = "\n".join(chunk)
             message_text = (
@@ -912,12 +913,12 @@ async def show_detailed_users(callback: CallbackQuery, callback_data: StatsDetai
                 f"Всего: {total_users}\n\n"
                 f"{users_text}"
             )
-            
+
             await callback.message.answer(
                 message_text,
                 parse_mode=ParseMode.HTML
             )
-    
+
     await callback.answer()
 
 
@@ -957,7 +958,7 @@ async def broadcast_start_create(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(BroadcastState.waiting_for_content)
-    
+
     await callback.message.edit_text(
         "📝 <b>Создание рассылки</b>\n\n"
         "Отправьте текст рассылки.\n\n"
@@ -968,7 +969,7 @@ async def broadcast_start_create(callback: CallbackQuery, state: FSMContext):
         "<code>&lt;a href=\"URL\"&gt;ссылка&lt;/a&gt;</code>",
         parse_mode=ParseMode.HTML
     )
-    
+
     await callback.message.answer(
         "❌ Отмена",
         reply_markup=get_cancel_keyboard(),
@@ -985,11 +986,11 @@ async def broadcast_show_list(callback: CallbackQuery):
         return
 
     broadcasts = await db.get_scheduled_broadcasts()
-    
+
     if not broadcasts:
         await callback.answer("📭 Нет запланированных рассылок", show_alert=True)
         return
-    
+
     await callback.message.edit_text(
         "📋 <b>Запланированные рассылки</b>\n\n"
         f"Всего: {len(broadcasts)}",
@@ -1046,10 +1047,10 @@ async def broadcast_receive_content(message: Message, state: FSMContext):
 
     # Используем html_text для сохранения форматирования (жирный, курсив и т.д.)
     content = message.html_text
-    
+
     # Сохраняем текст в состояние
     await state.update_data(content=content)
-    
+
     # Спрашиваем про медиа
     await state.set_state(BroadcastState.waiting_for_media)
     await message.answer(
@@ -1066,7 +1067,7 @@ async def broadcast_skip_media(message: Message, state: FSMContext):
     """Пропуск добавления медиа"""
     if not is_admin(message.from_user.username):
         return
-    
+
     # Переходим к кнопкам
     await state.set_state(BroadcastState.waiting_for_buttons)
     await message.answer(
@@ -1087,21 +1088,22 @@ async def broadcast_receive_media(message: Message, state: FSMContext):
     """Получение медиа для рассылки"""
     if not is_admin(message.from_user.username):
         return
-    
+
     # Определяем тип медиа и file_id
     if message.photo:
         media_type = 'photo'
-        media_file_id = message.photo[-1].file_id  # Берём фото максимального размера
+        # Берём фото максимального размера
+        media_file_id = message.photo[-1].file_id
     elif message.video:
         media_type = 'video'
         media_file_id = message.video.file_id
     else:
         await message.answer("❌ Пожалуйста, отправьте фото или видео.")
         return
-    
+
     # Сохраняем медиа в состояние
     await state.update_data(media_type=media_type, media_file_id=media_file_id)
-    
+
     # Переходим к кнопкам
     await state.set_state(BroadcastState.waiting_for_buttons)
     await message.answer(
@@ -1123,11 +1125,11 @@ async def broadcast_skip_buttons(message: Message, state: FSMContext):
     """Пропуск добавления кнопок"""
     if not is_admin(message.from_user.username):
         return
-    
+
     # Получаем данные для превью
     data = await state.get_data()
     content = data.get('content', '')
-    
+
     # Переходим к выбору аудитории
     await message.answer(
         "👁 <b>Превью рассылки:</b>\n\n"
@@ -1144,27 +1146,27 @@ async def broadcast_receive_buttons(message: Message, state: FSMContext):
     """Получение кнопок для рассылки"""
     if not is_admin(message.from_user.username):
         return
-    
+
     import json
-    
+
     # Парсим кнопки из текста
     lines = message.text.strip().split('\n')
     buttons_data = []
-    
+
     for line in lines:
         if '|' not in line:
             continue
-        
+
         parts = line.split('|', 1)
         text = parts[0].strip()
         target = parts[1].strip()
-        
+
         # Определяем тип кнопки (url или callback_data)
         if target.startswith('http://') or target.startswith('https://'):
             buttons_data.append([{"text": text, "url": target}])
         else:
             buttons_data.append([{"text": text, "callback_data": target}])
-    
+
     if not buttons_data:
         await message.answer(
             "❌ Не удалось распознать кнопки. Попробуйте ещё раз или нажмите <b>Пропустить</b>.",
@@ -1172,15 +1174,15 @@ async def broadcast_receive_buttons(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         )
         return
-    
+
     # Сохраняем кнопки в JSON
     buttons_json = json.dumps(buttons_data, ensure_ascii=False)
     await state.update_data(buttons=buttons_json)
-    
+
     # Получаем данные для превью
     data = await state.get_data()
     content = data.get('content', '')
-    
+
     # Переходим к выбору аудитории
     await message.answer(
         f"✅ Кнопки добавлены: {len(buttons_data)} шт.\n\n"
@@ -1201,19 +1203,19 @@ async def broadcast_select_audience(callback: CallbackQuery, callback_data: Broa
         return
 
     audience = callback_data.audience
-    
+
     # Получаем количество пользователей
     user_count = await db.get_broadcast_audience_count(audience)
-    
+
     # Сохраняем аудиторию
     await state.update_data(audience=audience, user_count=user_count)
-    
+
     # Получаем данные для превью
     data = await state.get_data()
     content = data.get('content', '')
-    
+
     audience_name = get_audience_display_name(audience)
-    
+
     await callback.message.edit_text(
         "📨 <b>Превью рассылки</b>\n\n"
         f"{content}\n\n"
@@ -1238,13 +1240,13 @@ async def broadcast_send_now(callback: CallbackQuery, state: FSMContext):
     content = data.get('content', '')
     audience = data.get('audience', 'all')
     user_count = data.get('user_count', 0)
-    
+
     # Устанавливаем время "сейчас"
     now = datetime.now(YEKATERINBURG_TZ)
     await state.update_data(scheduled_at=now)
-    
+
     audience_name = get_audience_display_name(audience)
-    
+
     await callback.message.edit_text(
         "🚀 <b>ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ</b>\n\n"
         f"📝 <b>Текст рассылки:</b>\n{content}\n\n"
@@ -1268,9 +1270,9 @@ async def broadcast_schedule(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(BroadcastState.waiting_for_date)
-    
+
     now = datetime.now(YEKATERINBURG_TZ)
-    
+
     await callback.message.edit_text(
         "📅 <b>Выберите дату отправки</b>\n\n"
         f"Текущая дата (Екатеринбург): <b>{now.strftime('%d.%m.%Y')}</b>\n\n"
@@ -1288,11 +1290,11 @@ async def broadcast_receive_date(message: Message, state: FSMContext):
         return
 
     date_str = message.text.strip()
-    
+
     # Парсим дату
     try:
         date = datetime.strptime(date_str, "%d.%m.%Y")
-        
+
         # Проверяем что дата не в прошлом
         now = datetime.now(YEKATERINBURG_TZ)
         if date.date() < now.date():
@@ -1302,10 +1304,10 @@ async def broadcast_receive_date(message: Message, state: FSMContext):
                 parse_mode=ParseMode.HTML
             )
             return
-        
+
         await state.update_data(date=date_str)
         await state.set_state(BroadcastState.waiting_for_time)
-        
+
         await message.answer(
             f"📅 Дата: <b>{date_str}</b>\n\n"
             "⏰ <b>Выберите время отправки</b>\n\n"
@@ -1330,17 +1332,17 @@ async def broadcast_receive_time(message: Message, state: FSMContext):
         return
 
     time_str = message.text.strip()
-    
+
     # Парсим время
     try:
         time = datetime.strptime(time_str, "%H:%M")
-        
+
         data = await state.get_data()
         date_str = data.get('date')
         content = data.get('content', '')
         audience = data.get('audience', 'all')
         user_count = data.get('user_count', 0)
-        
+
         # Собираем полную дату и время
         date = datetime.strptime(date_str, "%d.%m.%Y")
         scheduled_at = datetime(
@@ -1351,7 +1353,7 @@ async def broadcast_receive_time(message: Message, state: FSMContext):
             minute=time.minute,
             tzinfo=YEKATERINBURG_TZ
         )
-        
+
         # Проверяем что время не в прошлом
         now = datetime.now(YEKATERINBURG_TZ)
         if scheduled_at <= now:
@@ -1361,13 +1363,13 @@ async def broadcast_receive_time(message: Message, state: FSMContext):
                 parse_mode=ParseMode.HTML
             )
             return
-        
+
         await state.update_data(scheduled_at=scheduled_at)
         await state.set_state(None)  # Сбрасываем состояние
-        
+
         audience_name = get_audience_display_name(audience)
         scheduled_str = scheduled_at.strftime('%d.%m.%Y в %H:%M')
-        
+
         await message.answer(
             "🚀 <b>ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ</b>\n\n"
             f"📝 <b>Текст рассылки:</b>\n{content}\n\n"
@@ -1403,17 +1405,18 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
     media_type = data.get('media_type')
     media_file_id = data.get('media_file_id')
     buttons = data.get('buttons')
-    
+
     if not content or not scheduled_at:
         await callback.answer("❌ Ошибка: данные рассылки утеряны", show_alert=True)
         return
-    
+
     # Конвертируем в UTC для хранения в БД
     if isinstance(scheduled_at, datetime) and scheduled_at.tzinfo:
-        scheduled_at_utc = scheduled_at.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        scheduled_at_utc = scheduled_at.astimezone(
+            ZoneInfo("UTC")).replace(tzinfo=None)
     else:
         scheduled_at_utc = scheduled_at
-    
+
     # Создаём рассылку в БД
     broadcast_id = await db.create_broadcast(
         content=content,
@@ -1425,12 +1428,12 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         media_file_id=media_file_id,
         buttons=buttons
     )
-    
+
     await state.clear()
-    
+
     audience_name = get_audience_display_name(audience)
     user_count = await db.get_broadcast_audience_count(audience)
-    
+
     if isinstance(scheduled_at, datetime):
         if scheduled_at.tzinfo:
             scheduled_str = scheduled_at.strftime('%d.%m.%Y в %H:%M')
@@ -1438,7 +1441,7 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
             scheduled_str = "Сейчас"
     else:
         scheduled_str = "Сейчас"
-    
+
     await callback.message.edit_text(
         "✅ <b>Рассылка создана!</b>\n\n"
         f"📨 ID: <code>{broadcast_id}</code>\n"
@@ -1449,8 +1452,9 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_broadcast_menu_keyboard(),
         parse_mode=ParseMode.HTML
     )
-    
-    logger.info(f"Broadcast {broadcast_id} created by {callback.from_user.username}")
+
+    logger.info(
+        f"Broadcast {broadcast_id} created by {callback.from_user.username}")
     await callback.answer("✅ Рассылка создана!")
 
 
@@ -1462,7 +1466,7 @@ async def broadcast_edit(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(BroadcastState.waiting_for_content)
-    
+
     await callback.message.edit_text(
         "✏️ <b>Редактирование рассылки</b>\n\n"
         "Отправьте новый текст рассылки.",
@@ -1479,7 +1483,7 @@ async def broadcast_cancel_create(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.clear()
-    
+
     await callback.message.edit_text(
         "❌ Создание рассылки отменено.\n\n"
         "📣 <b>Управление рассылками</b>\n\n"
@@ -1499,28 +1503,29 @@ async def broadcast_view(callback: CallbackQuery, callback_data: BroadcastListCa
 
     broadcast_id = callback_data.broadcast_id
     broadcast = await db.get_broadcast(broadcast_id)
-    
+
     if not broadcast:
         await callback.answer("❌ Рассылка не найдена", show_alert=True)
         return
-    
+
     content = broadcast['content']
     audience = broadcast['audience']
     scheduled_at = broadcast['scheduled_at']
     status = broadcast['status']
     created_by_username = broadcast.get('created_by_username', 'Unknown')
-    
+
     audience_name = get_audience_display_name(audience)
     user_count = await db.get_broadcast_audience_count(audience)
-    
+
     # Парсим дату и конвертируем в Екатеринбург
     try:
         dt = datetime.fromisoformat(scheduled_at)
-        dt_ekb = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(YEKATERINBURG_TZ)
+        dt_ekb = dt.replace(tzinfo=ZoneInfo(
+            "UTC")).astimezone(YEKATERINBURG_TZ)
         scheduled_str = dt_ekb.strftime('%d.%m.%Y в %H:%M')
     except:
         scheduled_str = scheduled_at
-    
+
     status_names = {
         'pending': '⏳ Ожидает отправки',
         'sending': '📤 Отправляется...',
@@ -1528,7 +1533,7 @@ async def broadcast_view(callback: CallbackQuery, callback_data: BroadcastListCa
         'cancelled': '❌ Отменена'
     }
     status_name = status_names.get(status, status)
-    
+
     await callback.message.edit_text(
         f"📨 <b>Рассылка #{broadcast_id}</b>\n\n"
         f"📝 <b>Текст:</b>\n{content}\n\n"
@@ -1553,14 +1558,15 @@ async def broadcast_cancel_scheduled(callback: CallbackQuery, callback_data: Bro
 
     broadcast_id = callback_data.broadcast_id
     cancelled = await db.cancel_broadcast(broadcast_id)
-    
+
     if cancelled:
-        logger.info(f"Broadcast {broadcast_id} cancelled by {callback.from_user.username}")
+        logger.info(
+            f"Broadcast {broadcast_id} cancelled by {callback.from_user.username}")
         await callback.answer("✅ Рассылка отменена!", show_alert=True)
-        
+
         # Показываем обновлённый список
         broadcasts = await db.get_scheduled_broadcasts()
-        
+
         if not broadcasts:
             await callback.message.edit_text(
                 "📣 <b>Управление рассылками</b>\n\n"
@@ -1588,7 +1594,7 @@ async def broadcast_list_page(callback: CallbackQuery, callback_data: BroadcastL
 
     page = callback_data.page
     broadcasts = await db.get_scheduled_broadcasts()
-    
+
     await callback.message.edit_text(
         "📋 <b>Запланированные рассылки</b>\n\n"
         f"Всего: {len(broadcasts)}",
@@ -1613,23 +1619,34 @@ def get_trigger_display_name(trigger: str) -> str:
 
 @router.callback_query(TemplateMenuCallback.filter(F.action == "list"))
 async def template_show_menu(callback: CallbackQuery, state: FSMContext):
-    """Показать меню шаблонов"""
+    """Показать меню шаблонов или список шаблонов"""
     if not is_admin(callback.from_user.username):
         await callback.answer("⛔ Нет доступа", show_alert=True)
         return
 
     await state.clear()
-    
-    # Получаем количество шаблонов
+
+    # Получаем шаблоны
     templates = await db.get_templates()
+
+    if not templates:
+        # Если шаблонов нет, показываем меню
+        await callback.message.edit_text(
+            "📁 <b>Шаблоны рассылок</b>\n\n"
+            "📭 Нет сохранённых шаблонов.\n\n"
+            "Шаблоны позволяют сохранять тексты рассылок для повторного использования.",
+            reply_markup=get_template_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    else:
+        # Если есть шаблоны, показываем список
+        await callback.message.edit_text(
+            "📋 <b>Мои шаблоны</b>\n\n"
+            f"Всего: {len(templates)}",
+            reply_markup=get_template_list_keyboard(templates),
+            parse_mode=ParseMode.HTML
+        )
     
-    await callback.message.edit_text(
-        "📁 <b>Шаблоны рассылок</b>\n\n"
-        f"Сохранённых шаблонов: {len(templates)}\n\n"
-        "Шаблоны позволяют сохранять тексты рассылок для повторного использования.",
-        reply_markup=get_template_menu_keyboard(),
-        parse_mode=ParseMode.HTML
-    )
     await callback.answer()
 
 
@@ -1641,14 +1658,14 @@ async def template_start_create(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(TemplateState.waiting_for_content)
-    
+
     await callback.message.edit_text(
         "📝 <b>Создание шаблона</b>\n\n"
         "Отправьте текст шаблона рассылки.\n\n"
         "💡 <i>Можете использовать HTML-форматирование</i>",
         parse_mode=ParseMode.HTML
     )
-    
+
     await callback.message.answer(
         "❌ Для отмены нажмите кнопку ниже",
         reply_markup=get_cancel_keyboard()
@@ -1700,12 +1717,132 @@ async def template_receive_content(message: Message, state: FSMContext):
 
     content = message.html_text
     await state.update_data(content=content)
-    await state.set_state(TemplateState.waiting_for_name)
-    
+
+    # Спрашиваем про медиа
+    await state.set_state(TemplateState.waiting_for_media)
     await message.answer(
-        "👁 <b>Превью шаблона:</b>\n\n"
-        f"{content}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📸 <b>Добавление медиа (опционально)</b>\n\n"
+        "Отправьте фото или видео, которое хотите добавить к шаблону.\n\n"
+        "Или нажмите <b>Пропустить</b>, если медиа не нужно.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(TemplateState.waiting_for_media, F.text == "⏭ Пропустить")
+async def template_skip_media(message: Message, state: FSMContext):
+    """Пропуск добавления медиа для шаблона"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Переходим к кнопкам
+    await state.set_state(TemplateState.waiting_for_buttons)
+    await message.answer(
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(TemplateState.waiting_for_media, F.photo | F.video)
+async def template_receive_media(message: Message, state: FSMContext):
+    """Получение медиа для шаблона"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Определяем тип медиа и file_id
+    if message.photo:
+        media_type = 'photo'
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_type = 'video'
+        media_file_id = message.video.file_id
+    else:
+        await message.answer("❌ Пожалуйста, отправьте фото или видео.")
+        return
+
+    # Сохраняем медиа в состояние
+    await state.update_data(media_type=media_type, media_file_id=media_file_id)
+
+    # Переходим к кнопкам
+    await state.set_state(TemplateState.waiting_for_buttons)
+    await message.answer(
+        "✅ Медиа добавлено!\n\n"
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(TemplateState.waiting_for_buttons, F.text == "⏭ Пропустить")
+async def template_skip_buttons(message: Message, state: FSMContext):
+    """Пропуск добавления кнопок для шаблона"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Переходим к названию
+    await state.set_state(TemplateState.waiting_for_name)
+    await message.answer(
+        "📌 <b>Отправьте название шаблона</b>\n"
+        "(короткое название для удобного поиска)",
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(TemplateState.waiting_for_buttons, F.text)
+async def template_receive_buttons(message: Message, state: FSMContext):
+    """Получение кнопок для шаблона"""
+    if not is_admin(message.from_user.username):
+        return
+
+    import json
+
+    # Парсим кнопки из текста
+    lines = message.text.strip().split('\n')
+    buttons_data = []
+
+    for line in lines:
+        if '|' not in line:
+            continue
+
+        parts = line.split('|', 1)
+        text = parts[0].strip()
+        target = parts[1].strip()
+
+        # Определяем тип кнопки (url или callback_data)
+        if target.startswith('http://') or target.startswith('https://'):
+            buttons_data.append([{"text": text, "url": target}])
+        else:
+            buttons_data.append([{"text": text, "callback_data": target}])
+
+    if not buttons_data:
+        await message.answer(
+            "❌ Не удалось распознать кнопки. Попробуйте ещё раз или нажмите <b>Пропустить</b>.",
+            reply_markup=get_skip_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Сохраняем кнопки в JSON
+    buttons_json = json.dumps(buttons_data, ensure_ascii=False)
+    await state.update_data(buttons=buttons_json)
+
+    # Переходим к названию
+    await state.set_state(TemplateState.waiting_for_name)
+    await message.answer(
+        f"✅ Кнопки добавлены: {len(buttons_data)} шт.\n\n"
         "📌 <b>Отправьте название шаблона</b>\n"
         "(короткое название для удобного поиска)",
         parse_mode=ParseMode.HTML
@@ -1721,17 +1858,23 @@ async def template_receive_name(message: Message, state: FSMContext):
     name = message.text.strip()[:100]  # Ограничиваем длину
     data = await state.get_data()
     content = data.get('content', '')
-    
+    media_type = data.get('media_type')
+    media_file_id = data.get('media_file_id')
+    buttons = data.get('buttons')
+
     # Сохраняем шаблон
     template_id = await db.create_template(
         content=content,
         created_by=message.from_user.id,
         created_by_username=message.from_user.username,
-        name=name
+        name=name,
+        media_type=media_type,
+        media_file_id=media_file_id,
+        buttons=buttons
     )
-    
+
     await state.clear()
-    
+
     await message.answer(
         f"✅ <b>Шаблон сохранён!</b>\n\n"
         f"📌 Название: {name}\n"
@@ -1744,8 +1887,9 @@ async def template_receive_name(message: Message, state: FSMContext):
         reply_markup=get_template_menu_keyboard(),
         parse_mode=ParseMode.HTML
     )
-    
-    logger.info(f"Template {template_id} created by {message.from_user.username}")
+
+    logger.info(
+        f"Template {template_id} created by {message.from_user.username}")
 
 
 @router.callback_query(TemplateSelectCallback.filter(F.action == "view"))
@@ -1757,15 +1901,15 @@ async def template_view_list_or_item(callback: CallbackQuery, callback_data: Tem
 
     template_id = callback_data.template_id
     page = callback_data.page
-    
+
     if template_id == 0:
         # Показываем список с пагинацией
         templates = await db.get_templates()
-        
+
         if not templates:
             await callback.answer("📭 Нет сохранённых шаблонов", show_alert=True)
             return
-        
+
         await callback.message.edit_text(
             "📋 <b>Мои шаблоны</b>\n\n"
             f"Всего: {len(templates)}",
@@ -1775,11 +1919,11 @@ async def template_view_list_or_item(callback: CallbackQuery, callback_data: Tem
     else:
         # Показываем конкретный шаблон
         template = await db.get_template(template_id)
-        
+
         if not template:
             await callback.answer("❌ Шаблон не найден", show_alert=True)
             return
-        
+
         await callback.message.edit_text(
             f"📄 <b>Шаблон: {template.get('name', 'Без названия')}</b>\n\n"
             f"{template['content']}\n\n"
@@ -1788,7 +1932,7 @@ async def template_view_list_or_item(callback: CallbackQuery, callback_data: Tem
             reply_markup=get_template_view_keyboard(template_id),
             parse_mode=ParseMode.HTML
         )
-    
+
     await callback.answer()
 
 
@@ -1800,14 +1944,14 @@ async def template_use_for_broadcast(callback: CallbackQuery, callback_data: Tem
         return
 
     template = await db.get_template(callback_data.template_id)
-    
+
     if not template:
         await callback.answer("❌ Шаблон не найден", show_alert=True)
         return
-    
+
     # Сохраняем текст в состояние и переходим к выбору аудитории
     await state.update_data(content=template['content'])
-    
+
     await callback.message.edit_text(
         "👁 <b>Превью рассылки:</b>\n\n"
         f"{template['content']}\n\n"
@@ -1827,14 +1971,14 @@ async def template_use_for_auto_broadcast(callback: CallbackQuery, callback_data
         return
 
     template = await db.get_template(callback_data.template_id)
-    
+
     if not template:
         await callback.answer("❌ Шаблон не найден", show_alert=True)
         return
-    
+
     # Сохраняем текст в состояние и переходим к выбору триггера
     await state.update_data(content=template['content'])
-    
+
     await callback.message.edit_text(
         "🤖 <b>Создание авто-рассылки</b>\n\n"
         f"📝 Текст:\n{template['content']}\n\n"
@@ -1855,14 +1999,15 @@ async def template_delete(callback: CallbackQuery, callback_data: TemplateSelect
         return
 
     deleted = await db.delete_template(callback_data.template_id)
-    
+
     if deleted:
-        logger.info(f"Template {callback_data.template_id} deleted by {callback.from_user.username}")
+        logger.info(
+            f"Template {callback_data.template_id} deleted by {callback.from_user.username}")
         await callback.answer("✅ Шаблон удалён!", show_alert=True)
-        
+
         # Показываем обновлённый список
         templates = await db.get_templates()
-        
+
         if not templates:
             await callback.message.edit_text(
                 "📁 <b>Шаблоны рассылок</b>\n\n"
@@ -1891,10 +2036,10 @@ async def auto_broadcast_show_menu(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.clear()
-    
+
     auto_broadcasts = await db.get_auto_broadcasts()
     active_count = len([ab for ab in auto_broadcasts if ab.get('is_active')])
-    
+
     await callback.message.edit_text(
         "🤖 <b>Автоматические рассылки</b>\n\n"
         f"Всего: {len(auto_broadcasts)}\n"
@@ -1915,14 +2060,14 @@ async def auto_broadcast_start_create(callback: CallbackQuery, state: FSMContext
         return
 
     await state.set_state(AutoBroadcastState.waiting_for_content)
-    
+
     await callback.message.edit_text(
         "📝 <b>Создание авто-рассылки</b>\n\n"
         "Отправьте текст сообщения, которое будет отправляться автоматически.\n\n"
         "💡 <i>Можете использовать HTML-форматирование</i>",
         parse_mode=ParseMode.HTML
     )
-    
+
     await callback.message.answer(
         "❌ Для отмены нажмите кнопку ниже",
         reply_markup=get_cancel_keyboard()
@@ -1973,9 +2118,144 @@ async def auto_broadcast_receive_content(message: Message, state: FSMContext):
 
     content = message.html_text
     await state.update_data(content=content)
-    await state.set_state(None)
-    
+
+    # Спрашиваем про медиа
+    await state.set_state(AutoBroadcastState.waiting_for_media)
     await message.answer(
+        "📸 <b>Добавление медиа (опционально)</b>\n\n"
+        "Отправьте фото или видео, которое хотите добавить к авто-рассылке.\n\n"
+        "Или нажмите <b>Пропустить</b>, если медиа не нужно.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(AutoBroadcastState.waiting_for_media, F.text == "⏭ Пропустить")
+async def auto_broadcast_skip_media(message: Message, state: FSMContext):
+    """Пропуск добавления медиа для авто-рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Переходим к кнопкам
+    await state.set_state(AutoBroadcastState.waiting_for_buttons)
+    await message.answer(
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(AutoBroadcastState.waiting_for_media, F.photo | F.video)
+async def auto_broadcast_receive_media(message: Message, state: FSMContext):
+    """Получение медиа для авто-рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Определяем тип медиа и file_id
+    if message.photo:
+        media_type = 'photo'
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_type = 'video'
+        media_file_id = message.video.file_id
+    else:
+        await message.answer("❌ Пожалуйста, отправьте фото или видео.")
+        return
+
+    # Сохраняем медиа в состояние
+    await state.update_data(media_type=media_type, media_file_id=media_file_id)
+
+    # Переходим к кнопкам
+    await state.set_state(AutoBroadcastState.waiting_for_buttons)
+    await message.answer(
+        "✅ Медиа добавлено!\n\n"
+        "🔘 <b>Добавление кнопок (опционально)</b>\n\n"
+        "Отправьте кнопки в формате:\n"
+        "<code>Текст кнопки 1 | https://example.com\n"
+        "Текст кнопки 2 | /start</code>\n\n"
+        "Каждая строка — одна кнопка.\n"
+        "Используйте <code>|</code> для разделения текста и ссылки/команды.\n\n"
+        "Или нажмите <b>Пропустить</b>.",
+        reply_markup=get_skip_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(AutoBroadcastState.waiting_for_buttons, F.text == "⏭ Пропустить")
+async def auto_broadcast_skip_buttons(message: Message, state: FSMContext):
+    """Пропуск добавления кнопок для авто-рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+
+    # Получаем данные для превью
+    data = await state.get_data()
+    content = data.get('content', '')
+
+    # Переходим к выбору триггера
+    await state.set_state(None)
+    await message.answer(
+        "👁 <b>Превью авто-рассылки:</b>\n\n"
+        f"{content}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 <b>Выберите триггер:</b>\n"
+        "Когда отправлять это сообщение?",
+        reply_markup=get_auto_broadcast_trigger_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(AutoBroadcastState.waiting_for_buttons, F.text)
+async def auto_broadcast_receive_buttons(message: Message, state: FSMContext):
+    """Получение кнопок для авто-рассылки"""
+    if not is_admin(message.from_user.username):
+        return
+
+    import json
+
+    # Парсим кнопки из текста
+    lines = message.text.strip().split('\n')
+    buttons_data = []
+
+    for line in lines:
+        if '|' not in line:
+            continue
+
+        parts = line.split('|', 1)
+        text = parts[0].strip()
+        target = parts[1].strip()
+
+        # Определяем тип кнопки (url или callback_data)
+        if target.startswith('http://') or target.startswith('https://'):
+            buttons_data.append([{"text": text, "url": target}])
+        else:
+            buttons_data.append([{"text": text, "callback_data": target}])
+
+    if not buttons_data:
+        await message.answer(
+            "❌ Не удалось распознать кнопки. Попробуйте ещё раз или нажмите <b>Пропустить</b>.",
+            reply_markup=get_skip_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Сохраняем кнопки в JSON
+    buttons_json = json.dumps(buttons_data, ensure_ascii=False)
+    await state.update_data(buttons=buttons_json)
+
+    # Получаем данные для превью
+    data = await state.get_data()
+    content = data.get('content', '')
+
+    # Переходим к выбору триггера
+    await state.set_state(None)
+    await message.answer(
+        f"✅ Кнопки добавлены: {len(buttons_data)} шт.\n\n"
         "👁 <b>Превью авто-рассылки:</b>\n\n"
         f"{content}\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1995,11 +2275,11 @@ async def auto_broadcast_select_trigger(callback: CallbackQuery, callback_data: 
 
     trigger = callback_data.trigger
     await state.update_data(trigger=trigger)
-    
+
     trigger_name = get_trigger_display_name(trigger)
     data = await state.get_data()
     content = data.get('content', '')
-    
+
     await callback.message.edit_text(
         "👁 <b>Превью авто-рассылки:</b>\n\n"
         f"{content}\n\n"
@@ -2022,13 +2302,13 @@ async def auto_broadcast_select_delay(callback: CallbackQuery, callback_data: Au
 
     delay_hours = callback_data.hours
     await state.update_data(delay_hours=delay_hours)
-    
+
     data = await state.get_data()
     content = data.get('content', '')
     trigger = data.get('trigger', '')
-    
+
     trigger_name = get_trigger_display_name(trigger)
-    
+
     # Форматируем задержку
     if delay_hours < 24:
         delay_str = f"{delay_hours} час." if delay_hours == 1 else f"{delay_hours} час."
@@ -2038,7 +2318,7 @@ async def auto_broadcast_select_delay(callback: CallbackQuery, callback_data: Au
         delay_str = "48 часов (2 дня)"
     else:
         delay_str = f"{delay_hours} часов ({delay_hours // 24} дня)"
-    
+
     await callback.message.edit_text(
         "🚀 <b>ПОДТВЕРЖДЕНИЕ АВТО-РАССЫЛКИ</b>\n\n"
         f"📝 <b>Текст:</b>\n{content}\n\n"
@@ -2064,24 +2344,30 @@ async def auto_broadcast_confirm(callback: CallbackQuery, state: FSMContext):
     content = data.get('content', '')
     trigger = data.get('trigger', '')
     delay_hours = data.get('delay_hours', 24)
-    
+    media_type = data.get('media_type')
+    media_file_id = data.get('media_file_id')
+    buttons = data.get('buttons')
+
     if not content or not trigger:
         await callback.answer("❌ Ошибка: данные утеряны", show_alert=True)
         return
-    
+
     # Создаём авто-рассылку
     auto_id = await db.create_auto_broadcast(
         trigger_type=trigger,
         content=content,
         delay_hours=delay_hours,
         created_by=callback.from_user.id,
-        created_by_username=callback.from_user.username
+        created_by_username=callback.from_user.username,
+        media_type=media_type,
+        media_file_id=media_file_id,
+        buttons=buttons
     )
-    
+
     await state.clear()
-    
+
     trigger_name = get_trigger_display_name(trigger)
-    
+
     await callback.message.edit_text(
         "✅ <b>Авто-рассылка создана!</b>\n\n"
         f"🆔 ID: {auto_id}\n"
@@ -2092,8 +2378,9 @@ async def auto_broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_auto_broadcast_menu_keyboard(),
         parse_mode=ParseMode.HTML
     )
-    
-    logger.info(f"Auto-broadcast {auto_id} created by {callback.from_user.username}")
+
+    logger.info(
+        f"Auto-broadcast {auto_id} created by {callback.from_user.username}")
     await callback.answer("✅ Авто-рассылка создана!")
 
 
@@ -2105,7 +2392,7 @@ async def auto_broadcast_edit(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AutoBroadcastState.waiting_for_content)
-    
+
     await callback.message.edit_text(
         "✏️ <b>Редактирование авто-рассылки</b>\n\n"
         "Отправьте новый текст.",
@@ -2122,7 +2409,7 @@ async def auto_broadcast_cancel_create(callback: CallbackQuery, state: FSMContex
         return
 
     await state.clear()
-    
+
     await callback.message.edit_text(
         "❌ Создание авто-рассылки отменено.\n\n"
         "🤖 <b>Автоматические рассылки</b>",
@@ -2141,32 +2428,33 @@ async def auto_broadcast_view_list_or_item(callback: CallbackQuery, callback_dat
 
     auto_id = callback_data.auto_id
     page = callback_data.page
-    
+
     if auto_id == 0:
         # Показываем список
         auto_broadcasts = await db.get_auto_broadcasts()
-        
+
         if not auto_broadcasts:
             await callback.answer("📭 Нет авто-рассылок", show_alert=True)
             return
-        
+
         await callback.message.edit_text(
             "📋 <b>Активные авто-рассылки</b>\n\n"
             f"Всего: {len(auto_broadcasts)}",
-            reply_markup=get_auto_broadcast_list_keyboard(auto_broadcasts, page),
+            reply_markup=get_auto_broadcast_list_keyboard(
+                auto_broadcasts, page),
             parse_mode=ParseMode.HTML
         )
     else:
         # Показываем конкретную авто-рассылку
         auto_bc = await db.get_auto_broadcast(auto_id)
-        
+
         if not auto_bc:
             await callback.answer("❌ Авто-рассылка не найдена", show_alert=True)
             return
-        
+
         trigger_name = get_trigger_display_name(auto_bc['trigger_type'])
         status = "🟢 Активна" if auto_bc['is_active'] else "🔴 Приостановлена"
-        
+
         await callback.message.edit_text(
             f"🤖 <b>Авто-рассылка #{auto_id}</b>\n\n"
             f"📝 <b>Текст:</b>\n{auto_bc['content']}\n\n"
@@ -2176,10 +2464,11 @@ async def auto_broadcast_view_list_or_item(callback: CallbackQuery, callback_dat
             f"📊 <b>Статус:</b> {status}\n"
             f"📨 <b>Отправлено:</b> {auto_bc['sent_count']} раз\n"
             f"👤 <b>Создал:</b> @{auto_bc.get('created_by_username', 'unknown')}",
-            reply_markup=get_auto_broadcast_view_keyboard(auto_id, auto_bc['is_active']),
+            reply_markup=get_auto_broadcast_view_keyboard(
+                auto_id, auto_bc['is_active']),
             parse_mode=ParseMode.HTML
         )
-    
+
     await callback.answer()
 
 
@@ -2192,17 +2481,18 @@ async def auto_broadcast_toggle(callback: CallbackQuery, callback_data: AutoBroa
 
     auto_id = callback_data.auto_id
     toggled = await db.toggle_auto_broadcast(auto_id)
-    
+
     if toggled:
         auto_bc = await db.get_auto_broadcast(auto_id)
         status = "активирована" if auto_bc['is_active'] else "приостановлена"
-        logger.info(f"Auto-broadcast {auto_id} {status} by {callback.from_user.username}")
+        logger.info(
+            f"Auto-broadcast {auto_id} {status} by {callback.from_user.username}")
         await callback.answer(f"✅ Авто-рассылка {status}!", show_alert=True)
-        
+
         # Обновляем отображение
         trigger_name = get_trigger_display_name(auto_bc['trigger_type'])
         status_emoji = "🟢 Активна" if auto_bc['is_active'] else "🔴 Приостановлена"
-        
+
         await callback.message.edit_text(
             f"🤖 <b>Авто-рассылка #{auto_id}</b>\n\n"
             f"📝 <b>Текст:</b>\n{auto_bc['content']}\n\n"
@@ -2212,7 +2502,8 @@ async def auto_broadcast_toggle(callback: CallbackQuery, callback_data: AutoBroa
             f"📊 <b>Статус:</b> {status_emoji}\n"
             f"📨 <b>Отправлено:</b> {auto_bc['sent_count']} раз\n"
             f"👤 <b>Создал:</b> @{auto_bc.get('created_by_username', 'unknown')}",
-            reply_markup=get_auto_broadcast_view_keyboard(auto_id, auto_bc['is_active']),
+            reply_markup=get_auto_broadcast_view_keyboard(
+                auto_id, auto_bc['is_active']),
             parse_mode=ParseMode.HTML
         )
     else:
@@ -2228,14 +2519,15 @@ async def auto_broadcast_delete(callback: CallbackQuery, callback_data: AutoBroa
 
     auto_id = callback_data.auto_id
     deleted = await db.delete_auto_broadcast(auto_id)
-    
+
     if deleted:
-        logger.info(f"Auto-broadcast {auto_id} deleted by {callback.from_user.username}")
+        logger.info(
+            f"Auto-broadcast {auto_id} deleted by {callback.from_user.username}")
         await callback.answer("✅ Авто-рассылка удалена!", show_alert=True)
-        
+
         # Показываем обновлённый список
         auto_broadcasts = await db.get_auto_broadcasts()
-        
+
         if not auto_broadcasts:
             await callback.message.edit_text(
                 "🤖 <b>Автоматические рассылки</b>\n\n"
