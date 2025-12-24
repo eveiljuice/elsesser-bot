@@ -27,6 +27,13 @@ def get_payment_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_fmd_promo_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для промо FMD с кнопкой-командой"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎁 Хочу сделать себе подарок!", callback_data="/fmd")
+    return builder.as_markup()
+
+
 def get_calories_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора калорийности"""
     builder = InlineKeyboardBuilder()
