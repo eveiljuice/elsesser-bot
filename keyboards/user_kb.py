@@ -163,7 +163,7 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False) -> Inli
         )
     else:
         builder.button(
-            text="🥗 FMD Протокол (5 дней) — 990 ₽",
+            text="🥗 FMD Протокол (5 дней) — 1190 ₽",
             callback_data=ProductSelectCallback(product="fmd")
         )
     
