@@ -463,3 +463,98 @@ async def process_auto_broadcasts(bot: Bot):
         if sent_count > 0:
             logger.info(
                 f"Auto-broadcast {auto_id} ({trigger_type}): sent to {sent_count} new users")
+
+
+# ==================== Chain Broadcast System ====================
+
+async def process_chain_messages(bot: Bot):
+    """
+    Обработать все отложенные сообщения цепочек
+    Вызывается периодически из scheduler
+    
+    Для каждого пользователя с активной цепочкой:
+    1. Проверяем, пришло ли время отправки следующего сообщения
+    2. Отправляем сообщение текущего шага
+    3. Обновляем состояние пользователя
+    """
+    from keyboards.admin_kb import build_chain_step_keyboard
+    from datetime import datetime, timedelta
+    
+    # Получаем все pending сообщения цепочек
+    pending_messages = await db.get_pending_chain_messages()
+    
+    for msg in pending_messages:
+        user_id = msg['user_id']
+        chain_id = msg['chain_id']
+        step_id = msg['current_step_id']
+        content = msg['content']
+        media_type = msg.get('media_type')
+        media_file_id = msg.get('media_file_id')
+        
+        try:
+            # Получаем кнопки шага
+            buttons = await db.get_step_buttons(step_id)
+            reply_markup = build_chain_step_keyboard(buttons, chain_id, step_id) if buttons else None
+            
+            # Отправляем сообщение
+            if media_type == 'photo' and media_file_id:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=media_file_id,
+                    caption=content,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+            elif media_type == 'video' and media_file_id:
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=media_file_id,
+                    caption=content,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=content,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+            
+            # Логируем отправку
+            await db.log_chain_message(user_id, chain_id, step_id)
+            
+            # Если кнопок нет, автоматически переходим к следующему шагу
+            if not buttons:
+                step = await db.get_chain_step(step_id)
+                if step:
+                    next_step = await db.get_next_chain_step(chain_id, step['step_order'])
+                    
+                    if next_step:
+                        delay_hours = next_step.get('delay_hours', 0)
+                        next_message_at = datetime.now() + timedelta(hours=delay_hours)
+                        
+                        await db.update_user_chain_state(
+                            user_id, chain_id,
+                            current_step_id=next_step['id'],
+                            next_message_at=next_message_at
+                        )
+                    else:
+                        # Цепочка завершена
+                        await db.complete_user_chain(user_id, chain_id)
+            else:
+                # Если есть кнопки, ждём действия пользователя
+                # Устанавливаем next_message_at в далёкое будущее чтобы не отправлять повторно
+                await db.update_user_chain_state(
+                    user_id, chain_id,
+                    next_message_at=datetime.now() + timedelta(days=365)
+                )
+            
+            logger.info(f"Chain message sent: chain={chain_id}, step={step_id}, user={user_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send chain message to user {user_id}: {e}")
+            # Не останавливаем цепочку при ошибке, попробуем позже
+        
+        # Небольшая задержка
+        await asyncio.sleep(0.05)

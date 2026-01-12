@@ -21,7 +21,19 @@ from keyboards.callbacks import (
     AutoBroadcastTriggerCallback,
     AutoBroadcastDelayCallback,
     AutoBroadcastConfirmCallback,
-    AutoBroadcastListCallback
+    AutoBroadcastListCallback,
+    ChainMenuCallback,
+    ChainListCallback,
+    ChainEditCallback,
+    ChainStepCallback,
+    ChainButtonActionCallback,
+    ChainTriggerCallback,
+    ChainAudienceCallback,
+    ChainUserButtonCallback,
+    UserManageMenuCallback,
+    UserListCallback,
+    UserActionCallback,
+    SupportReplyCallback
 )
 from data.recipes import RECIPES
 
@@ -56,6 +68,7 @@ def get_admin_main_menu() -> ReplyKeyboardMarkup:
     builder.button(text="📝 Редактировать рационы")
     builder.button(text="📊 Статистика")
     builder.button(text="📣 Управление рассылками")
+    builder.button(text="👥 Управление пользователями")
     builder.button(text="📬 Отправить недельный отчёт")
     builder.button(text="🔙 Выйти из админки")
     builder.adjust(1)
@@ -220,6 +233,10 @@ def get_broadcast_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text="🤖 Автоматические рассылки",
         callback_data=AutoBroadcastMenuCallback(action="list")
+    )
+    builder.button(
+        text="🔗 Цепочки рассылок",
+        callback_data=ChainMenuCallback(action="list")
     )
     
     builder.adjust(1)
@@ -692,3 +709,576 @@ def get_skip_keyboard() -> ReplyKeyboardMarkup:
     builder.button(text="⏭ Пропустить")
     builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
+
+
+# ==================== Broadcast Chain Keyboards ====================
+
+def get_chain_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню цепочек рассылок"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="➕ Создать цепочку",
+        callback_data=ChainMenuCallback(action="create")
+    )
+    builder.button(
+        text="📋 Мои цепочки",
+        callback_data=ChainListCallback(action="view", chain_id=0)
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=BroadcastMenuCallback(action="back")
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_trigger_keyboard() -> InlineKeyboardMarkup:
+    """Выбор триггера для цепочки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="✋ Ручной запуск",
+        callback_data=ChainTriggerCallback(trigger="manual")
+    )
+    builder.button(
+        text="⏰ Конец подписки (через 30 дней)",
+        callback_data=ChainTriggerCallback(trigger="subscription_end")
+    )
+    builder.button(
+        text="✅ После оплаты",
+        callback_data=ChainTriggerCallback(trigger="payment_approved")
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=ChainMenuCallback(action="back")
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_list_keyboard(chains: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Список цепочек с пагинацией"""
+    builder = InlineKeyboardBuilder()
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_chains = chains[start_idx:end_idx]
+    
+    for chain in page_chains:
+        status = "🟢" if chain.get('is_active', False) else "🔴"
+        name = chain.get('name', 'Без названия')[:25]
+        if len(chain.get('name', '')) > 25:
+            name += "..."
+        
+        builder.button(
+            text=f"{status} {name}",
+            callback_data=ChainListCallback(action="view", chain_id=chain['id'])
+        )
+    
+    # Пагинация
+    if page > 0:
+        builder.button(
+            text="◀️ Назад",
+            callback_data=ChainListCallback(action="view", chain_id=0, page=page - 1)
+        )
+    if end_idx < len(chains):
+        builder.button(
+            text="Вперёд ▶️",
+            callback_data=ChainListCallback(action="view", chain_id=0, page=page + 1)
+        )
+    
+    builder.button(
+        text="🔙 В меню цепочек",
+        callback_data=ChainMenuCallback(action="back")
+    )
+    
+    # Adjust
+    rows = [1] * len(page_chains)
+    if page > 0 and end_idx < len(chains):
+        rows.append(2)
+    elif page > 0 or end_idx < len(chains):
+        rows.append(1)
+    rows.append(1)
+    
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_chain_view_keyboard(chain_id: int, is_active: bool, steps_count: int) -> InlineKeyboardMarkup:
+    """Просмотр цепочки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text=f"📝 Шаги ({steps_count})",
+        callback_data=ChainEditCallback(action="view_steps", chain_id=chain_id)
+    )
+    builder.button(
+        text="➕ Добавить шаг",
+        callback_data=ChainEditCallback(action="add_step", chain_id=chain_id)
+    )
+    
+    if is_active:
+        builder.button(
+            text="⏸ Приостановить",
+            callback_data=ChainListCallback(action="toggle", chain_id=chain_id)
+        )
+    else:
+        builder.button(
+            text="▶️ Активировать",
+            callback_data=ChainListCallback(action="toggle", chain_id=chain_id)
+        )
+    
+    if steps_count > 0:
+        builder.button(
+            text="🚀 Запустить для аудитории",
+            callback_data=ChainEditCallback(action="start_send", chain_id=chain_id)
+        )
+    
+    builder.button(
+        text="🗑 Удалить цепочку",
+        callback_data=ChainListCallback(action="delete", chain_id=chain_id)
+    )
+    builder.button(
+        text="⬅️ К списку",
+        callback_data=ChainListCallback(action="view", chain_id=0)
+    )
+    
+    builder.adjust(2, 1, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_chain_steps_keyboard(chain_id: int, steps: list) -> InlineKeyboardMarkup:
+    """Список шагов цепочки"""
+    builder = InlineKeyboardBuilder()
+    
+    for step in steps:
+        order = step.get('step_order', 0)
+        content_preview = step.get('content', '')[:20].replace('\n', ' ')
+        if len(step.get('content', '')) > 20:
+            content_preview += "..."
+        delay = step.get('delay_hours', 0)
+        delay_str = f" (+{delay}ч)" if delay > 0 else ""
+        
+        builder.button(
+            text=f"📌 Шаг {order}: {content_preview}{delay_str}",
+            callback_data=ChainStepCallback(action="view", step_id=step['id'])
+        )
+    
+    builder.button(
+        text="➕ Добавить шаг",
+        callback_data=ChainEditCallback(action="add_step", chain_id=chain_id)
+    )
+    builder.button(
+        text="⬅️ К цепочке",
+        callback_data=ChainListCallback(action="view", chain_id=chain_id)
+    )
+    
+    # Adjust
+    rows = [1] * len(steps) + [1, 1]
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_chain_step_view_keyboard(step_id: int, chain_id: int, buttons: list) -> InlineKeyboardMarkup:
+    """Просмотр шага цепочки"""
+    builder = InlineKeyboardBuilder()
+    
+    # Показываем кнопки шага
+    if buttons:
+        builder.button(
+            text=f"🔘 Кнопки ({len(buttons)})",
+            callback_data=ChainStepCallback(action="view_buttons", step_id=step_id)
+        )
+    
+    builder.button(
+        text="✏️ Редактировать текст",
+        callback_data=ChainStepCallback(action="edit", step_id=step_id)
+    )
+    builder.button(
+        text="➕ Добавить кнопку",
+        callback_data=ChainStepCallback(action="add_button", step_id=step_id)
+    )
+    builder.button(
+        text="🗑 Удалить шаг",
+        callback_data=ChainEditCallback(action="delete_step", chain_id=chain_id, step_id=step_id)
+    )
+    builder.button(
+        text="⬅️ К шагам",
+        callback_data=ChainEditCallback(action="view_steps", chain_id=chain_id)
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_button_action_keyboard(step_id: int) -> InlineKeyboardMarkup:
+    """Выбор действия для кнопки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="➡️ Следующий шаг",
+        callback_data=ChainButtonActionCallback(action_type="next_step")
+    )
+    builder.button(
+        text="🔀 Перейти к шагу...",
+        callback_data=ChainButtonActionCallback(action_type="goto_step")
+    )
+    builder.button(
+        text="🔗 Ссылка (URL)",
+        callback_data=ChainButtonActionCallback(action_type="url")
+    )
+    builder.button(
+        text="⌨️ Команда бота",
+        callback_data=ChainButtonActionCallback(action_type="command")
+    )
+    builder.button(
+        text="⏹ Остановить цепочку",
+        callback_data=ChainButtonActionCallback(action_type="stop_chain")
+    )
+    builder.button(
+        text="💳 Оплата рациона",
+        callback_data=ChainButtonActionCallback(action_type="payment_main")
+    )
+    builder.button(
+        text="🥗 Оплата FMD",
+        callback_data=ChainButtonActionCallback(action_type="payment_fmd")
+    )
+    builder.button(
+        text="🎁 Оплата комплекта (скидка)",
+        callback_data=ChainButtonActionCallback(action_type="payment_bundle")
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=ChainStepCallback(action="view", step_id=step_id)
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_step_buttons_keyboard(step_id: int, buttons: list) -> InlineKeyboardMarkup:
+    """Список кнопок шага"""
+    builder = InlineKeyboardBuilder()
+    
+    action_names = {
+        'next_step': '➡️',
+        'goto_step': '🔀',
+        'url': '🔗',
+        'command': '⌨️',
+        'stop_chain': '⏹',
+        'payment_main': '💳',
+        'payment_fmd': '🥗',
+        'payment_bundle': '🎁'
+    }
+    
+    for btn in buttons:
+        action_icon = action_names.get(btn.get('action_type', ''), '❓')
+        text = btn.get('button_text', 'Кнопка')[:20]
+        
+        builder.button(
+            text=f"{action_icon} {text}",
+            callback_data=ChainStepCallback(action="edit_button", step_id=step_id, button_id=btn['id'])
+        )
+    
+    builder.button(
+        text="➕ Добавить кнопку",
+        callback_data=ChainStepCallback(action="add_button", step_id=step_id)
+    )
+    builder.button(
+        text="⬅️ К шагу",
+        callback_data=ChainStepCallback(action="view", step_id=step_id)
+    )
+    
+    rows = [1] * len(buttons) + [1, 1]
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_chain_button_edit_keyboard(step_id: int, button_id: int) -> InlineKeyboardMarkup:
+    """Редактирование кнопки шага"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="🗑 Удалить кнопку",
+        callback_data=ChainStepCallback(action="delete_button", step_id=step_id, button_id=button_id)
+    )
+    builder.button(
+        text="⬅️ К кнопкам",
+        callback_data=ChainStepCallback(action="view_buttons", step_id=step_id)
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_audience_keyboard(chain_id: int) -> InlineKeyboardMarkup:
+    """Выбор аудитории для запуска цепочки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="👥 Всем пользователям",
+        callback_data=ChainAudienceCallback(audience="all")
+    )
+    builder.button(
+        text="👆 Только /start (ничего не делали)",
+        callback_data=ChainAudienceCallback(audience="start_only")
+    )
+    builder.button(
+        text="💰 Оплатившие",
+        callback_data=ChainAudienceCallback(audience="paid")
+    )
+    builder.button(
+        text="❌ Не оплатившие",
+        callback_data=ChainAudienceCallback(audience="not_paid")
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=ChainListCallback(action="view", chain_id=chain_id)
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_chain_confirm_send_keyboard(chain_id: int) -> InlineKeyboardMarkup:
+    """Подтверждение запуска цепочки для аудитории"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="✅ Запустить",
+        callback_data=ChainEditCallback(action="confirm_send", chain_id=chain_id)
+    )
+    builder.button(
+        text="❌ Отмена",
+        callback_data=ChainListCallback(action="view", chain_id=chain_id)
+    )
+    
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def get_chain_step_goto_keyboard(chain_id: int, steps: list, current_step_id: int) -> InlineKeyboardMarkup:
+    """Выбор шага для перехода"""
+    builder = InlineKeyboardBuilder()
+    
+    for step in steps:
+        if step['id'] == current_step_id:
+            continue  # Пропускаем текущий шаг
+        order = step.get('step_order', 0)
+        content_preview = step.get('content', '')[:15].replace('\n', ' ')
+        if len(step.get('content', '')) > 15:
+            content_preview += "..."
+        
+        builder.button(
+            text=f"📌 Шаг {order}: {content_preview}",
+            callback_data=ChainEditCallback(action="select_goto", chain_id=chain_id, step_id=step['id'])
+        )
+    
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=ChainStepCallback(action="add_button", step_id=current_step_id)
+    )
+    
+    rows = [1] * (len(steps) - 1) + [1]
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def build_chain_step_keyboard(buttons: list, chain_id: int, step_id: int) -> InlineKeyboardMarkup:
+    """Построить клавиатуру для шага цепочки (для пользователя)"""
+    builder = InlineKeyboardBuilder()
+    
+    for btn in buttons:
+        action_type = btn.get('action_type', '')
+        
+        if action_type == 'url':
+            # URL кнопка
+            builder.button(
+                text=btn.get('button_text', 'Ссылка'),
+                url=btn.get('action_value', 'https://t.me')
+            )
+        else:
+            # Callback кнопка
+            builder.button(
+                text=btn.get('button_text', 'Кнопка'),
+                callback_data=ChainUserButtonCallback(
+                    chain_id=chain_id,
+                    step_id=step_id,
+                    button_id=btn['id']
+                )
+            )
+    
+    builder.adjust(1)  # Каждая кнопка в отдельном ряду
+    return builder.as_markup()
+
+
+# ==================== User Management Keyboards ====================
+
+def get_user_management_menu() -> InlineKeyboardMarkup:
+    """Меню управления пользователями"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="👥 Все пользователи",
+        callback_data=UserManageMenuCallback(action="list_all")
+    )
+    builder.button(
+        text="💰 Оплатившие рационы",
+        callback_data=UserListCallback(action="view", payment_filter="paid_main")
+    )
+    builder.button(
+        text="🥗 Оплатившие FMD",
+        callback_data=UserListCallback(action="view", payment_filter="paid_fmd")
+    )
+    builder.button(
+        text="🎁 Оплатившие комплект",
+        callback_data=UserListCallback(action="view", payment_filter="paid_bundle")
+    )
+    builder.button(
+        text="🔍 Поиск пользователя",
+        callback_data=UserManageMenuCallback(action="search")
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_user_list_keyboard(users: list, page: int = 0, per_page: int = 10, filter_type: str = "all") -> InlineKeyboardMarkup:
+    """Список пользователей с пагинацией"""
+    builder = InlineKeyboardBuilder()
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = users[start_idx:end_idx]
+    
+    for user in page_users:
+        # Формируем отображение пользователя
+        username = user.get('username')
+        first_name = user.get('first_name', 'Без имени')
+        user_id = user.get('user_id')
+        
+        # Статус оплаты
+        paid_main = user.get('has_paid', 0)
+        paid_fmd = user.get('has_paid_fmd', 0)
+        paid_bundle = user.get('has_paid_bundle', 0)
+        
+        status_icons = []
+        if paid_main:
+            status_icons.append("💰")
+        if paid_fmd:
+            status_icons.append("🥗")
+        if paid_bundle:
+            status_icons.append("🎁")
+        
+        status_str = "".join(status_icons) if status_icons else "⚪"
+        
+        display_name = f"@{username}" if username else first_name
+        display_name = display_name[:20] + "..." if len(display_name) > 20 else display_name
+        
+        builder.button(
+            text=f"{status_str} {display_name}",
+            callback_data=UserActionCallback(action="view", user_id=user_id)
+        )
+    
+    # Пагинация
+    nav_buttons = []
+    if page > 0:
+        builder.button(
+            text="◀️ Назад",
+            callback_data=UserListCallback(action="page", page=page - 1, payment_filter=filter_type)
+        )
+        nav_buttons.append(1)
+    if end_idx < len(users):
+        builder.button(
+            text="Вперёд ▶️",
+            callback_data=UserListCallback(action="page", page=page + 1, payment_filter=filter_type)
+        )
+        nav_buttons.append(1)
+    
+    builder.button(
+        text="🔙 В меню управления",
+        callback_data=UserManageMenuCallback(action="back")
+    )
+    
+    # Adjust: пользователи по одному, затем навигация
+    rows = [1] * len(page_users)
+    if page > 0 and end_idx < len(users):
+        rows.append(2)  # Обе кнопки навигации
+    elif page > 0 or end_idx < len(users):
+        rows.append(1)  # Одна кнопка навигации
+    rows.append(1)  # Кнопка "В меню"
+    
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_user_view_keyboard(user_id: int, has_paid: bool, has_paid_fmd: bool, has_paid_bundle: bool) -> InlineKeyboardMarkup:
+    """Просмотр и управление конкретным пользователем"""
+    builder = InlineKeyboardBuilder()
+    
+    # Кнопки сброса оплаты (показываем только если оплачено)
+    if has_paid:
+        builder.button(
+            text="❌ Сбросить оплату рациона",
+            callback_data=UserActionCallback(action="reset_main", user_id=user_id)
+        )
+    
+    if has_paid_fmd:
+        builder.button(
+            text="❌ Сбросить оплату FMD",
+            callback_data=UserActionCallback(action="reset_fmd", user_id=user_id)
+        )
+    
+    if has_paid_bundle:
+        builder.button(
+            text="❌ Сбросить оплату комплекта",
+            callback_data=UserActionCallback(action="reset_bundle", user_id=user_id)
+        )
+    
+    if has_paid or has_paid_fmd or has_paid_bundle:
+        builder.button(
+            text="🗑 Сбросить ВСЕ оплаты",
+            callback_data=UserActionCallback(action="reset_all", user_id=user_id)
+        )
+    
+    builder.button(
+        text="⬅️ К списку",
+        callback_data=UserManageMenuCallback(action="list_all")
+    )
+    
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_user_confirm_reset_keyboard(user_id: int, reset_type: str) -> InlineKeyboardMarkup:
+    """Подтверждение сброса оплаты"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="✅ Да, сбросить",
+        callback_data=UserActionCallback(action=f"confirm_{reset_type}", user_id=user_id)
+    )
+    builder.button(
+        text="❌ Отмена",
+        callback_data=UserActionCallback(action="view", user_id=user_id)
+    )
+    
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+# ==================== Support (Отдел Заботы) ====================
+
+def get_support_reply_keyboard(user_id: int, question_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для ответа модератора на вопрос пользователя"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(
+        text="💬 Ответить",
+        callback_data=SupportReplyCallback(action="reply", user_id=user_id, question_id=question_id)
+    )
+    
+    return builder.as_markup()

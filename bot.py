@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from config import BOT_TOKEN, ADMIN_CHANNEL_ID
 import database as db
 from handlers import user_router, admin_router, calculator_router
-from followup import process_pending_followups, schedule_new_followups, process_pending_broadcasts, process_auto_broadcasts
+from followup import process_pending_followups, schedule_new_followups, process_pending_broadcasts, process_auto_broadcasts, process_chain_messages
 from keyboards.admin_kb import get_stats_detail_keyboard
 
 
@@ -71,6 +71,15 @@ async def task_process_auto_broadcasts():
             await process_auto_broadcasts(bot_instance)
     except Exception as e:
         logger.error(f"Error in task_process_auto_broadcasts: {e}")
+
+
+async def task_process_chain_messages():
+    """Задача: отправка отложенных сообщений цепочек"""
+    try:
+        if bot_instance:
+            await process_chain_messages(bot_instance)
+    except Exception as e:
+        logger.error(f"Error in task_process_chain_messages: {e}")
 
 
 async def task_send_weekly_report():
@@ -165,6 +174,7 @@ async def on_startup(bot: Bot):
     # БД уже инициализирована в main(), но вызываем снова на всякий случай
     # (CREATE TABLE IF NOT EXISTS безопасен)
     await db.init_db()
+    await db.init_chain_tables()  # Инициализация таблиц цепочек рассылок
 
     bot_info = await bot.get_me()
     logger.info(f"Bot started: @{bot_info.username}")
@@ -212,6 +222,7 @@ async def main():
     try:
         # Инициализируем БД ДО запуска scheduler (чтобы таблицы существовали)
         await db.init_db()
+        await db.init_chain_tables()  # Инициализация таблиц цепочек рассылок
         logger.info("Database initialized")
 
         # Удаляем вебхук (на случай если был) и пропускаем накопившиеся апдейты
@@ -247,7 +258,14 @@ async def main():
                 id="process_auto_broadcasts"
             )
 
-            # Задача 5: Недельный отчёт каждое воскресенье в 20:00
+            # Задача 5: Отправка отложенных сообщений цепочек (каждые 2 минуты)
+            await scheduler.add_schedule(
+                task_process_chain_messages,
+                IntervalTrigger(minutes=2),
+                id="process_chain_messages"
+            )
+
+            # Задача 6: Недельный отчёт каждое воскресенье в 20:00
             await scheduler.add_schedule(
                 task_send_weekly_report,
                 CronTrigger(day_of_week="sun", hour=20, minute=0),

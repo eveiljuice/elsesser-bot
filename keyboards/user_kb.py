@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from keyboards.callbacks import (
     PaymentCallback, CaloriesCallback, DayCallback, BackCallback,
     FMDPaymentCallback, FMDDayCallback, ProductSelectCallback, BackToProductsCallback,
-    FMDInfoCallback
+    FMDInfoCallback, BundlePaymentCallback
 )
 from data.recipes import RECIPES, FMD_RECIPES
 
@@ -15,7 +15,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     builder.button(text="🍽 Выбрать рацион")
     builder.button(text="📊 Рассчитать калории")
     builder.button(text="📋 Мой статус")
-    builder.button(text="❓ Помощь")
+    builder.button(text="💚 Отдел Заботы")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
@@ -97,6 +97,13 @@ def get_fmd_payment_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_bundle_payment_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для оплаты комплекта (Рационы + FMD)"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Я оплатила", callback_data=BundlePaymentCallback())
+    return builder.as_markup()
+
+
 def get_fmd_days_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора дня FMD протокола"""
     builder = InlineKeyboardBuilder()
@@ -137,14 +144,15 @@ def get_back_to_fmd_days_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_products_keyboard(has_main: bool = False, has_fmd: bool = False) -> InlineKeyboardMarkup:
-    """Клавиатура выбора продукта (основной рацион или FMD)
-    
+def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bundle: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура выбора продукта (основной рацион, FMD или комплект)
+
     has_main: True если оплачен основной рацион
     has_fmd: True если оплачен FMD протокол
+    has_bundle: True если оплачен комплект
     """
     builder = InlineKeyboardBuilder()
-    
+
     if has_main:
         builder.button(
             text="🍽 Рационы питания (14 дней) ✅",
@@ -155,7 +163,7 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False) -> Inli
             text="🍽 Рационы питания (14 дней) — 3000 ₽",
             callback_data=ProductSelectCallback(product="main")
         )
-    
+
     if has_fmd:
         builder.button(
             text="🥗 FMD Протокол (5 дней) ✅",
@@ -166,6 +174,6 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False) -> Inli
             text="🥗 FMD Протокол (5 дней) — 1190 ₽",
             callback_data=ProductSelectCallback(product="fmd")
         )
-    
+
     builder.adjust(1)  # По 1 кнопке в ряд
     return builder.as_markup()

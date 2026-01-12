@@ -11,6 +11,11 @@ class FMDPaymentCallback(CallbackData, prefix="fmd_pay"):
     pass
 
 
+class BundlePaymentCallback(CallbackData, prefix="bundle_pay"):
+    """Callback для кнопки 'Я оплатил(а)' (Комплект: Рационы + FMD)"""
+    pass
+
+
 class FMDDayCallback(CallbackData, prefix="fmd_day"):
     """Callback для выбора дня FMD протокола"""
     day: int
@@ -202,3 +207,85 @@ class AutoBroadcastListCallback(CallbackData, prefix="auto_list"):
     action: str  # view / toggle / delete
     auto_id: int = 0
     page: int = 0
+
+
+# ==================== Broadcast Chain (Funnel) Callbacks ====================
+
+class ChainMenuCallback(CallbackData, prefix="chain_menu"):
+    """Callback для меню цепочек рассылок"""
+    action: str  # list / create / back
+
+
+class ChainListCallback(CallbackData, prefix="chain_list"):
+    """Callback для списка цепочек"""
+    action: str  # view / toggle / delete
+    chain_id: int = 0
+    page: int = 0
+
+
+class ChainEditCallback(CallbackData, prefix="chain_edit"):
+    """Callback для редактирования цепочки"""
+    action: str  # add_step / edit_step / delete_step / view_steps / start_send / back
+    chain_id: int = 0
+    step_id: int = 0
+
+
+class ChainStepCallback(CallbackData, prefix="chain_step"):
+    """Callback для работы с шагами цепочки"""
+    action: str  # view / edit / add_button / delete_button / back
+    step_id: int = 0
+    button_id: int = 0
+
+
+class ChainButtonActionCallback(CallbackData, prefix="chain_btn_action"):
+    """Callback для выбора действия кнопки в шаге"""
+    action_type: str  # next_step / goto_step / url / command / stop_chain / payment_main / payment_fmd / payment_bundle
+
+
+class ChainTriggerCallback(CallbackData, prefix="chain_trigger"):
+    """Callback для выбора триггера запуска цепочки"""
+    trigger: str  # manual / subscription_end / payment_approved / custom
+
+
+class ChainAudienceCallback(CallbackData, prefix="chain_audience"):
+    """Callback для выбора аудитории для ручного запуска цепочки"""
+    audience: str  # all / start_only / paid / not_paid / custom
+
+
+class ChainUserButtonCallback(CallbackData, prefix="cub"):
+    """Callback для кнопок в сообщениях цепочки (для пользователей)
+    Prefix короткий чтобы вместить больше данных
+    """
+    chain_id: int
+    step_id: int
+    button_id: int
+
+
+# ==================== User Management Callbacks ====================
+
+class UserManageMenuCallback(CallbackData, prefix="user_menu"):
+    """Callback для меню управления пользователями"""
+    action: str  # list_all / list_paid / search / back
+
+
+class UserListCallback(CallbackData, prefix="user_list"):
+    """Callback для списка пользователей"""
+    action: str  # view / page
+    user_id: int = 0
+    page: int = 0
+    payment_filter: str = "all"  # all / paid_main / paid_fmd / paid_bundle
+
+
+class UserActionCallback(CallbackData, prefix="user_act"):
+    """Callback для действий над пользователем"""
+    action: str  # reset_main / reset_fmd / reset_bundle / reset_all / view / back
+    user_id: int
+
+
+# ==================== Support (Отдел Заботы) Callbacks ====================
+
+class SupportReplyCallback(CallbackData, prefix="support"):
+    """Callback для ответа модератора на вопрос пользователя"""
+    action: str  # reply
+    user_id: int
+    question_id: int

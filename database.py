@@ -30,8 +30,10 @@ async def init_db():
                 first_name TEXT,
                 has_paid INTEGER DEFAULT 0,
                 has_paid_fmd INTEGER DEFAULT 0,
+                has_paid_bundle INTEGER DEFAULT 0,
                 payment_request_date TEXT,
                 fmd_payment_request_date TEXT,
+                bundle_payment_request_date TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -43,6 +45,14 @@ async def init_db():
             pass  # Колонка уже существует
         try:
             await db.execute('ALTER TABLE users ADD COLUMN fmd_payment_request_date TEXT')
+        except:
+            pass  # Колонка уже существует
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN has_paid_bundle INTEGER DEFAULT 0')
+        except:
+            pass  # Колонка уже существует
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN bundle_payment_request_date TEXT')
         except:
             pass  # Колонка уже существует
         await db.execute('''
@@ -318,16 +328,51 @@ async def set_fmd_payment_status(user_id: int, status: bool):
         await db.commit()
 
 
+async def check_bundle_payment_status(user_id: int) -> bool:
+    """Проверить статус оплаты комплекта (Рационы + FMD)"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute(
+            'SELECT has_paid_bundle FROM users WHERE user_id = ?', (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
+
+
+async def set_bundle_payment_status(user_id: int, status: bool):
+    """Установить статус оплаты комплекта (Рационы + FMD)
+    
+    При активации комплекта также активирует доступ к основным рационам и FMD
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        if status:
+            # При оплате комплекта даём доступ ко всем продуктам
+            await db.execute(
+                'UPDATE users SET has_paid_bundle = 1, has_paid = 1, has_paid_fmd = 1 WHERE user_id = ?',
+                (user_id,)
+            )
+        else:
+            await db.execute(
+                'UPDATE users SET has_paid_bundle = 0 WHERE user_id = ?',
+                (user_id,)
+            )
+        await db.commit()
+
+
 async def create_payment_request(user_id: int, admin_message_id: int, product_type: str = 'main') -> int:
     """Создать запрос на оплату, вернуть ID запроса
     
-    product_type: 'main' - основной рацион, 'fmd' - FMD протокол
+    product_type: 'main' - основной рацион, 'fmd' - FMD протокол, 'bundle' - комплект
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         # Обновляем дату запроса у пользователя
         if product_type == 'fmd':
             await db.execute(
                 'UPDATE users SET fmd_payment_request_date = ? WHERE user_id = ?',
+                (datetime.now().isoformat(), user_id)
+            )
+        elif product_type == 'bundle':
+            await db.execute(
+                'UPDATE users SET bundle_payment_request_date = ? WHERE user_id = ?',
                 (datetime.now().isoformat(), user_id)
             )
         else:
@@ -1464,3 +1509,671 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
                 return [dict(row) for row in rows]
         
         return []
+
+
+# ==================== Broadcast Chain Management ====================
+
+async def init_chain_tables():
+    """Инициализация таблиц для цепочек рассылок"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        # Таблица цепочек рассылок (воронок)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS broadcast_chains (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                trigger_type TEXT NOT NULL CHECK(trigger_type IN ('manual', 'subscription_end', 'payment_approved', 'custom')),
+                is_active INTEGER DEFAULT 1,
+                created_by INTEGER NOT NULL,
+                created_by_username TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица шагов цепочки
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS chain_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id INTEGER NOT NULL,
+                step_order INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                media_type TEXT CHECK(media_type IN ('photo', 'video', NULL)),
+                media_file_id TEXT,
+                delay_hours INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(chain_id) REFERENCES broadcast_chains(id) ON DELETE CASCADE,
+                UNIQUE(chain_id, step_order)
+            )
+        ''')
+        
+        # Таблица кнопок шага (с действиями)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS chain_step_buttons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                step_id INTEGER NOT NULL,
+                button_text TEXT NOT NULL,
+                button_order INTEGER NOT NULL,
+                action_type TEXT NOT NULL CHECK(action_type IN ('next_step', 'goto_step', 'url', 'command', 'stop_chain', 'payment_main', 'payment_fmd', 'payment_bundle')),
+                action_value TEXT,
+                next_step_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(step_id) REFERENCES chain_steps(id) ON DELETE CASCADE,
+                FOREIGN KEY(next_step_id) REFERENCES chain_steps(id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # Таблица состояния пользователя в цепочке
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS chain_user_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                current_step_id INTEGER NOT NULL,
+                status TEXT CHECK(status IN ('active', 'completed', 'stopped')) DEFAULT 'active',
+                started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_action_at TEXT,
+                next_message_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(user_id),
+                FOREIGN KEY(chain_id) REFERENCES broadcast_chains(id) ON DELETE CASCADE,
+                FOREIGN KEY(current_step_id) REFERENCES chain_steps(id),
+                UNIQUE(user_id, chain_id)
+            )
+        ''')
+        
+        # Таблица истории отправок цепочки
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS chain_message_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chain_id INTEGER NOT NULL,
+                step_id INTEGER NOT NULL,
+                button_clicked TEXT,
+                sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(user_id),
+                FOREIGN KEY(chain_id) REFERENCES broadcast_chains(id) ON DELETE CASCADE,
+                FOREIGN KEY(step_id) REFERENCES chain_steps(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Индексы
+        await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chain_user_state_active 
+            ON chain_user_state(status, next_message_at)
+        ''')
+        
+        await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_chain_steps_order 
+            ON chain_steps(chain_id, step_order)
+        ''')
+        
+        await db.commit()
+
+
+async def create_chain(
+    name: str,
+    trigger_type: str,
+    created_by: int,
+    created_by_username: str = None,
+    description: str = None
+) -> int:
+    """Создать новую цепочку рассылок"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO broadcast_chains (name, description, trigger_type, created_by, created_by_username)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (name, description, trigger_type, created_by, created_by_username))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_chain(chain_id: int) -> Optional[Dict]:
+    """Получить цепочку по ID"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM broadcast_chains WHERE id = ?
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_all_chains(active_only: bool = False) -> List[Dict]:
+    """Получить все цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        if active_only:
+            async with db.execute('''
+                SELECT * FROM broadcast_chains WHERE is_active = 1 ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        else:
+            async with db.execute('''
+                SELECT * FROM broadcast_chains ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+
+async def update_chain(chain_id: int, **kwargs) -> bool:
+    """Обновить цепочку"""
+    allowed_fields = ['name', 'description', 'trigger_type', 'is_active']
+    fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
+    
+    if not fields:
+        return False
+    
+    set_clause = ', '.join([f"{k} = ?" for k in fields.keys()])
+    values = list(fields.values()) + [chain_id]
+    
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute(f'''
+            UPDATE broadcast_chains SET {set_clause} WHERE id = ?
+        ''', values)
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_chain(chain_id: int) -> bool:
+    """Удалить цепочку (каскадно удалит все шаги и состояния)"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            DELETE FROM broadcast_chains WHERE id = ?
+        ''', (chain_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def toggle_chain_active(chain_id: int) -> bool:
+    """Переключить активность цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute('''
+            SELECT is_active FROM broadcast_chains WHERE id = ?
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            new_status = 0 if row[0] else 1
+        
+        await db.execute('''
+            UPDATE broadcast_chains SET is_active = ? WHERE id = ?
+        ''', (new_status, chain_id))
+        await db.commit()
+        return True
+
+
+# ==================== Chain Steps ====================
+
+async def add_chain_step(
+    chain_id: int,
+    step_order: int,
+    content: str,
+    media_type: str = None,
+    media_file_id: str = None,
+    delay_hours: int = 0
+) -> int:
+    """Добавить шаг в цепочку"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO chain_steps (chain_id, step_order, content, media_type, media_file_id, delay_hours)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (chain_id, step_order, content, media_type, media_file_id, delay_hours))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_chain_step(step_id: int) -> Optional[Dict]:
+    """Получить шаг по ID"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_steps WHERE id = ?
+        ''', (step_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_chain_steps(chain_id: int) -> List[Dict]:
+    """Получить все шаги цепочки в порядке"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_steps WHERE chain_id = ? ORDER BY step_order ASC
+        ''', (chain_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_first_chain_step(chain_id: int) -> Optional[Dict]:
+    """Получить первый шаг цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_steps WHERE chain_id = ? ORDER BY step_order ASC LIMIT 1
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_next_chain_step(chain_id: int, current_order: int) -> Optional[Dict]:
+    """Получить следующий шаг цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_steps 
+            WHERE chain_id = ? AND step_order > ?
+            ORDER BY step_order ASC LIMIT 1
+        ''', (chain_id, current_order)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def update_chain_step(step_id: int, **kwargs) -> bool:
+    """Обновить шаг цепочки"""
+    allowed_fields = ['content', 'media_type', 'media_file_id', 'delay_hours', 'step_order']
+    fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
+    
+    if not fields:
+        return False
+    
+    set_clause = ', '.join([f"{k} = ?" for k in fields.keys()])
+    values = list(fields.values()) + [step_id]
+    
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute(f'''
+            UPDATE chain_steps SET {set_clause} WHERE id = ?
+        ''', values)
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_chain_step(step_id: int) -> bool:
+    """Удалить шаг цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            DELETE FROM chain_steps WHERE id = ?
+        ''', (step_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_chain_steps_count(chain_id: int) -> int:
+    """Получить количество шагов в цепочке"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute('''
+            SELECT COUNT(*) FROM chain_steps WHERE chain_id = ?
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+# ==================== Chain Step Buttons ====================
+
+async def add_step_button(
+    step_id: int,
+    button_text: str,
+    button_order: int,
+    action_type: str,
+    action_value: str = None,
+    next_step_id: int = None
+) -> int:
+    """Добавить кнопку к шагу"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            INSERT INTO chain_step_buttons (step_id, button_text, button_order, action_type, action_value, next_step_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (step_id, button_text, button_order, action_type, action_value, next_step_id))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_step_buttons(step_id: int) -> List[Dict]:
+    """Получить все кнопки шага"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_step_buttons WHERE step_id = ? ORDER BY button_order ASC
+        ''', (step_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_step_button(button_id: int) -> Optional[Dict]:
+    """Получить кнопку по ID"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_step_buttons WHERE id = ?
+        ''', (button_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_step_button(button_id: int) -> bool:
+    """Удалить кнопку шага"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            DELETE FROM chain_step_buttons WHERE id = ?
+        ''', (button_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_step_buttons(step_id: int) -> int:
+    """Удалить все кнопки шага"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute('''
+            DELETE FROM chain_step_buttons WHERE step_id = ?
+        ''', (step_id,))
+        await db.commit()
+        return cursor.rowcount
+
+
+# ==================== Chain User State ====================
+
+async def start_chain_for_user(user_id: int, chain_id: int, first_step_id: int) -> int:
+    """Запустить цепочку для пользователя"""
+    now = datetime.now().isoformat()
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        # Проверяем, есть ли уже запись для этого пользователя и цепочки
+        async with db.execute('''
+            SELECT id, status FROM chain_user_state WHERE user_id = ? AND chain_id = ?
+        ''', (user_id, chain_id)) as cursor:
+            existing = await cursor.fetchone()
+            if existing:
+                state_id, status = existing
+                if status == 'active':
+                    # Уже активна - возвращаем существующий ID
+                    return state_id
+                else:
+                    # Перезапускаем цепочку - обновляем запись
+                    await db.execute('''
+                        UPDATE chain_user_state 
+                        SET current_step_id = ?, status = 'active', started_at = ?, last_action_at = ?, next_message_at = ?
+                        WHERE id = ?
+                    ''', (first_step_id, now, now, now, state_id))
+                    await db.commit()
+                    return state_id
+        
+        # Создаём новую запись
+        cursor = await db.execute('''
+            INSERT INTO chain_user_state (user_id, chain_id, current_step_id, status, started_at, last_action_at, next_message_at)
+            VALUES (?, ?, ?, 'active', ?, ?, ?)
+        ''', (user_id, chain_id, first_step_id, now, now, now))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_user_chain_state(user_id: int, chain_id: int) -> Optional[Dict]:
+    """Получить состояние пользователя в цепочке"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT * FROM chain_user_state WHERE user_id = ? AND chain_id = ?
+        ''', (user_id, chain_id)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_user_active_chains(user_id: int) -> List[Dict]:
+    """Получить все активные цепочки пользователя"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT cus.*, bc.name as chain_name 
+            FROM chain_user_state cus
+            JOIN broadcast_chains bc ON cus.chain_id = bc.id
+            WHERE cus.user_id = ? AND cus.status = 'active'
+        ''', (user_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def update_user_chain_state(
+    user_id: int,
+    chain_id: int,
+    current_step_id: int = None,
+    status: str = None,
+    next_message_at: datetime = None
+) -> bool:
+    """Обновить состояние пользователя в цепочке"""
+    updates = []
+    values = []
+    
+    if current_step_id is not None:
+        updates.append("current_step_id = ?")
+        values.append(current_step_id)
+    
+    if status is not None:
+        updates.append("status = ?")
+        values.append(status)
+    
+    if next_message_at is not None:
+        updates.append("next_message_at = ?")
+        values.append(next_message_at.isoformat())
+    
+    updates.append("last_action_at = ?")
+    values.append(datetime.now().isoformat())
+    
+    if not updates:
+        return False
+    
+    values.extend([user_id, chain_id])
+    
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        cursor = await db.execute(f'''
+            UPDATE chain_user_state SET {', '.join(updates)} WHERE user_id = ? AND chain_id = ?
+        ''', values)
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def stop_user_chain(user_id: int, chain_id: int) -> bool:
+    """Остановить цепочку для пользователя"""
+    return await update_user_chain_state(user_id, chain_id, status='stopped')
+
+
+async def complete_user_chain(user_id: int, chain_id: int) -> bool:
+    """Пометить цепочку как завершённую"""
+    return await update_user_chain_state(user_id, chain_id, status='completed')
+
+
+async def get_pending_chain_messages() -> List[Dict]:
+    """Получить все pending сообщения цепочки которые пора отправить"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.now().isoformat()
+        async with db.execute('''
+            SELECT cus.*, cs.content, cs.media_type, cs.media_file_id, cs.step_order,
+                   bc.name as chain_name, u.username, u.first_name
+            FROM chain_user_state cus
+            JOIN chain_steps cs ON cus.current_step_id = cs.id
+            JOIN broadcast_chains bc ON cus.chain_id = bc.id
+            JOIN users u ON cus.user_id = u.user_id
+            WHERE cus.status = 'active'
+            AND cus.next_message_at <= ?
+            AND bc.is_active = 1
+        ''', (now,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def log_chain_message(user_id: int, chain_id: int, step_id: int, button_clicked: str = None):
+    """Записать историю отправки сообщения цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        await db.execute('''
+            INSERT INTO chain_message_history (user_id, chain_id, step_id, button_clicked)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, chain_id, step_id, button_clicked))
+        await db.commit()
+
+
+# ==================== User Management ====================
+
+async def get_all_users() -> List[Dict]:
+    """Получить всех пользователей"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('''
+            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+            FROM users
+            ORDER BY created_at DESC
+        ''') as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_users_by_payment_filter(filter_type: str) -> List[Dict]:
+    """
+    Получить пользователей по фильтру оплаты
+    
+    filter_type:
+    - 'all': все пользователи
+    - 'paid_main': оплатившие основной рацион
+    - 'paid_fmd': оплатившие FMD протокол
+    - 'paid_bundle': оплатившие комплект
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        if filter_type == 'paid_main':
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                FROM users
+                WHERE has_paid = 1
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif filter_type == 'paid_fmd':
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                FROM users
+                WHERE has_paid_fmd = 1
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        elif filter_type == 'paid_bundle':
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                FROM users
+                WHERE has_paid_bundle = 1
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        
+        else:  # 'all'
+            return await get_all_users()
+
+
+async def reset_user_payment(user_id: int, payment_type: str) -> bool:
+    """
+    Сбросить оплату пользователя
+    
+    payment_type:
+    - 'main': сбросить оплату основного рациона
+    - 'fmd': сбросить оплату FMD протокола
+    - 'bundle': сбросить оплату комплекта
+    - 'all': сбросить все оплаты
+    """
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        if payment_type == 'main':
+            cursor = await db.execute('''
+                UPDATE users SET has_paid = 0 WHERE user_id = ?
+            ''', (user_id,))
+        elif payment_type == 'fmd':
+            cursor = await db.execute('''
+                UPDATE users SET has_paid_fmd = 0 WHERE user_id = ?
+            ''', (user_id,))
+        elif payment_type == 'bundle':
+            cursor = await db.execute('''
+                UPDATE users SET has_paid_bundle = 0 WHERE user_id = ?
+            ''', (user_id,))
+        elif payment_type == 'all':
+            cursor = await db.execute('''
+                UPDATE users SET has_paid = 0, has_paid_fmd = 0, has_paid_bundle = 0 WHERE user_id = ?
+            ''', (user_id,))
+        else:
+            return False
+        
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def search_user_by_username_or_id(query: str) -> List[Dict]:
+    """Поиск пользователя по username или user_id"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        
+        # Попытка поиска по user_id (если запрос — число)
+        try:
+            user_id = int(query)
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                FROM users
+                WHERE user_id = ?
+            ''', (user_id,)) as cursor:
+                rows = await cursor.fetchall()
+                if rows:
+                    return [dict(row) for row in rows]
+        except ValueError:
+            pass
+        
+        # Поиск по username (без @)
+        search_query = query.lstrip('@').lower()
+        async with db.execute('''
+            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+            FROM users
+            WHERE LOWER(username) LIKE ? OR LOWER(first_name) LIKE ?
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (f'%{search_query}%', f'%{search_query}%')) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def get_chain_stats(chain_id: int) -> Dict:
+    """Получить статистику цепочки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        stats = {}
+        
+        # Всего пользователей запустили цепочку
+        async with db.execute('''
+            SELECT COUNT(DISTINCT user_id) FROM chain_user_state WHERE chain_id = ?
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats['total_started'] = row[0] if row else 0
+        
+        # Активных
+        async with db.execute('''
+            SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'active'
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats['active'] = row[0] if row else 0
+        
+        # Завершили
+        async with db.execute('''
+            SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'completed'
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats['completed'] = row[0] if row else 0
+        
+        # Остановили
+        async with db.execute('''
+            SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'stopped'
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats['stopped'] = row[0] if row else 0
+        
+        # Всего отправлено сообщений
+        async with db.execute('''
+            SELECT COUNT(*) FROM chain_message_history WHERE chain_id = ?
+        ''', (chain_id,)) as cursor:
+            row = await cursor.fetchone()
+            stats['messages_sent'] = row[0] if row else 0
+        
+        return stats
