@@ -4308,12 +4308,12 @@ async def support_reply_start(callback: CallbackQuery, callback_data: SupportRep
     # Извлекаем текст вопроса из оригинального сообщения
     original_text = callback.message.text or ""
     question_text = ""
-    
+
     # Парсим текст вопроса из сообщения (ищем после "❓ Вопрос:")
     if "❓" in original_text:
         parts = original_text.split("❓")
         if len(parts) > 1:
-            # Берём всё после "❓ Вопрос:" 
+            # Берём всё после "❓ Вопрос:"
             question_part = parts[1]
             # Убираем префикс "Вопрос:" если есть
             if "Вопрос:" in question_part:
@@ -4335,10 +4335,10 @@ async def support_reply_start(callback: CallbackQuery, callback_data: SupportRep
         f"💬 <b>Ответ пользователю</b>\n\n"
         f"🆔 ID: <code>{user_id}</code>\n"
     )
-    
+
     if question_text:
         reply_prompt += f"\n❓ <b>Вопрос:</b>\n<i>{question_text}</i>\n"
-    
+
     reply_prompt += (
         f"\nНапиши ответ и он будет отправлен пользователю.\n"
         f"Отправь /cancel для отмены."
@@ -4437,23 +4437,23 @@ async def support_reply_via_thread(message: Message, bot: Bot):
     """
     original_message = message.reply_to_message
     original_text = original_message.text or ""
-    
+
     # Проверяем что это ответ на сообщение с вопросом от поддержки
     if "Новый вопрос в Отдел Заботы" not in original_text and "🆔 ID:" not in original_text:
         return  # Это не вопрос от поддержки, игнорируем
-    
+
     # Извлекаем user_id из оригинального сообщения
     # Ищем паттерн "🆔 ID: 1234567890"
     match = re.search(r'🆔 ID:\s*(\d+)', original_text)
     if not match:
         return  # Не нашли ID пользователя
-    
+
     user_id = int(match.group(1))
     reply_text = message.text
-    
+
     if not reply_text:
         return  # Только текстовые ответы
-    
+
     try:
         # Отправляем ответ пользователю
         await bot.send_message(
@@ -4464,7 +4464,7 @@ async def support_reply_via_thread(message: Message, bot: Bot):
             ),
             parse_mode=ParseMode.HTML
         )
-        
+
         # Убираем кнопку "Ответить" с оригинального сообщения
         try:
             await bot.edit_message_reply_markup(
@@ -4474,17 +4474,19 @@ async def support_reply_via_thread(message: Message, bot: Bot):
             )
         except Exception:
             pass
-        
+
         # Подтверждаем модератору что ответ отправлен
         await message.reply(
             f"✅ Ответ отправлен пользователю {user_id}",
             parse_mode=ParseMode.HTML
         )
-        
-        logger.info(f"Support reply via thread sent to user {user_id} by {message.from_user.username}")
-        
+
+        logger.info(
+            f"Support reply via thread sent to user {user_id} by {message.from_user.username}")
+
     except Exception as e:
-        logger.error(f"Failed to send support reply via thread to user {user_id}: {e}")
+        logger.error(
+            f"Failed to send support reply via thread to user {user_id}: {e}")
         await message.reply(
             "❌ Не удалось отправить ответ. Возможно, пользователь заблокировал бота.",
             parse_mode=ParseMode.HTML
