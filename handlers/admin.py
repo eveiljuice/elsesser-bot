@@ -4305,19 +4305,47 @@ async def support_reply_start(callback: CallbackQuery, callback_data: SupportRep
     user_id = callback_data.user_id
     question_id = callback_data.question_id
 
+    # Извлекаем текст вопроса из оригинального сообщения
+    original_text = callback.message.text or ""
+    question_text = ""
+    
+    # Парсим текст вопроса из сообщения (ищем после "❓ Вопрос:")
+    if "❓" in original_text:
+        parts = original_text.split("❓")
+        if len(parts) > 1:
+            # Берём всё после "❓ Вопрос:" 
+            question_part = parts[1]
+            # Убираем префикс "Вопрос:" если есть
+            if "Вопрос:" in question_part:
+                question_text = question_part.split("Вопрос:", 1)[1].strip()
+            else:
+                question_text = question_part.strip()
+
     # Сохраняем данные для ответа
     await state.update_data(
         support_user_id=user_id,
         support_question_id=question_id,
-        support_original_message_id=callback.message.message_id
+        support_original_message_id=callback.message.message_id,
+        support_question_text=question_text
     )
     await state.set_state(SupportReplyState.waiting_for_reply)
 
-    await callback.message.answer(
+    # Формируем сообщение с текстом вопроса
+    reply_prompt = (
         f"💬 <b>Ответ пользователю</b>\n\n"
-        f"🆔 ID: <code>{user_id}</code>\n\n"
-        f"Напиши ответ и он будет отправлен пользователю.\n"
-        f"Отправь /cancel для отмены.",
+        f"🆔 ID: <code>{user_id}</code>\n"
+    )
+    
+    if question_text:
+        reply_prompt += f"\n❓ <b>Вопрос:</b>\n<i>{question_text}</i>\n"
+    
+    reply_prompt += (
+        f"\nНапиши ответ и он будет отправлен пользователю.\n"
+        f"Отправь /cancel для отмены."
+    )
+
+    await callback.message.answer(
+        reply_prompt,
         parse_mode=ParseMode.HTML
     )
     await callback.answer()
@@ -4398,3 +4426,66 @@ async def wrong_support_reply_content(message: Message):
         "Если хочешь отменить — отправь /cancel",
         parse_mode=ParseMode.HTML
     )
+
+
+# Обработчик ответов реплаем на вопросы в канале модераторов
+@router.message(F.chat.id == ADMIN_CHANNEL_ID, F.reply_to_message)
+async def support_reply_via_thread(message: Message, bot: Bot):
+    """
+    Автоматическая пересылка ответа модератора пользователю,
+    когда модератор отвечает реплаем на сообщение с вопросом в канале.
+    """
+    original_message = message.reply_to_message
+    original_text = original_message.text or ""
+    
+    # Проверяем что это ответ на сообщение с вопросом от поддержки
+    if "Новый вопрос в Отдел Заботы" not in original_text and "🆔 ID:" not in original_text:
+        return  # Это не вопрос от поддержки, игнорируем
+    
+    # Извлекаем user_id из оригинального сообщения
+    # Ищем паттерн "🆔 ID: 1234567890"
+    match = re.search(r'🆔 ID:\s*(\d+)', original_text)
+    if not match:
+        return  # Не нашли ID пользователя
+    
+    user_id = int(match.group(1))
+    reply_text = message.text
+    
+    if not reply_text:
+        return  # Только текстовые ответы
+    
+    try:
+        # Отправляем ответ пользователю
+        await bot.send_message(
+            chat_id=user_id,
+            text=(
+                "💚 <b>Ответ от Отдела Заботы:</b>\n\n"
+                f"{reply_text}"
+            ),
+            parse_mode=ParseMode.HTML
+        )
+        
+        # Убираем кнопку "Ответить" с оригинального сообщения
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=ADMIN_CHANNEL_ID,
+                message_id=original_message.message_id,
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        
+        # Подтверждаем модератору что ответ отправлен
+        await message.reply(
+            f"✅ Ответ отправлен пользователю {user_id}",
+            parse_mode=ParseMode.HTML
+        )
+        
+        logger.info(f"Support reply via thread sent to user {user_id} by {message.from_user.username}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send support reply via thread to user {user_id}: {e}")
+        await message.reply(
+            "❌ Не удалось отправить ответ. Возможно, пользователь заблокировал бота.",
+            parse_mode=ParseMode.HTML
+        )

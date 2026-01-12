@@ -127,6 +127,7 @@ async def cmd_help(message: Message, state: FSMContext):
         "📝 <b>Напиши свой вопрос</b> прямо сейчас — "
         "он будет передан нашей команде поддержки.\n\n"
         "💡 <i>Отправь текстовое сообщение с вопросом или нажми /cancel для отмены.</i>",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode=ParseMode.HTML
     )
 
@@ -254,8 +255,11 @@ async def cmd_bundle(message: Message):
 # ==================== Кнопки главного меню ====================
 
 @router.message(F.text == "🍽 Выбрать рацион")
-async def choose_ration(message: Message):
+async def choose_ration(message: Message, state: FSMContext):
     """Выбор рациона - показываем меню продуктов"""
+    # Сбрасываем любое активное состояние FSM
+    await state.clear()
+
     user_id = message.from_user.id
     has_paid = await db.check_payment_status(user_id)
     has_paid_fmd = await db.check_fmd_payment_status(user_id)
@@ -275,8 +279,10 @@ async def choose_ration(message: Message):
 
 
 @router.message(F.text == "📋 Мой статус")
-async def my_status(message: Message):
+async def my_status(message: Message, state: FSMContext):
     """Проверка статуса через кнопку меню"""
+    # Сбрасываем любое активное состояние FSM
+    await state.clear()
     await cmd_status(message)
 
 
@@ -287,8 +293,11 @@ async def support_button(message: Message, state: FSMContext):
 
 
 @router.message(F.text == "📊 Рассчитать калории")
-async def calculate_calories_button(message: Message):
+async def calculate_calories_button(message: Message, state: FSMContext):
     """Запуск калькулятора калорий"""
+    # Сбрасываем любое активное состояние FSM
+    await state.clear()
+
     has_paid = await db.check_payment_status(message.from_user.id)
 
     if not has_paid:
