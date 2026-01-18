@@ -7,6 +7,7 @@ from keyboards.callbacks import (
     FMDInfoCallback, BundlePaymentCallback
 )
 from data.recipes import RECIPES, FMD_RECIPES
+from config import PAYMENT_AMOUNT, FMD_PAYMENT_AMOUNT
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -155,12 +156,12 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bun
 
     if has_main:
         builder.button(
-            text="🍽 Рационы питания (14 дней) ✅",
+            text="🍽 Калькулятор тела (рационы питания) 14 дней ✅",
             callback_data=ProductSelectCallback(product="main")
         )
     else:
         builder.button(
-            text="🍽 Рационы питания (14 дней) — 3000 ₽",
+            text=f"🍽 Калькулятор тела (рационы питания) 14 дней — {PAYMENT_AMOUNT} ₽",
             callback_data=ProductSelectCallback(product="main")
         )
 
@@ -171,7 +172,7 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bun
         )
     else:
         builder.button(
-            text="🥗 FMD Протокол (5 дней) — 1190 ₽",
+            text=f"🥗 FMD Протокол (5 дней) — {FMD_PAYMENT_AMOUNT} ₽",
             callback_data=ProductSelectCallback(product="fmd")
         )
 
