@@ -709,6 +709,8 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
         await db.set_fmd_payment_status(user_id, True)
     elif product_type == 'bundle':
         await db.set_bundle_payment_status(user_id, True)
+    elif product_type == 'dry':
+        await db.set_dry_payment_status(user_id, True)
     else:
         await db.set_payment_status(user_id, True)
 
@@ -791,6 +793,18 @@ async def approve_payment(callback: CallbackQuery, callback_data: AdminCallback,
                     "Это займёт всего 2 минуты 👇"
                 ),
                 reply_markup=get_start_calculator_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+        elif product_type == 'dry':
+            # Сушка
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "🎉 <b>Оплата Сушки подтверждена!</b>\n\n"
+                    "Теперь у тебя есть доступ к 14-дневной программе Сушка!\n\n"
+                    "🔥 Нажми «🍽 Выбрать рацион» → «Сушка» чтобы начать."
+                ),
+                reply_markup=get_main_menu(),
                 parse_mode=ParseMode.HTML
             )
         else:
@@ -890,7 +904,13 @@ async def reject_payment(callback: CallbackQuery, callback_data: AdminCallback, 
 
     # Уведомляем пользователя
     try:
-        product_name = "FMD Протокола" if product_type == 'fmd' else "рациона"
+        product_names = {
+            'fmd': "FMD Протокола",
+            'bundle': "комплекта",
+            'dry': "Сушки",
+            'main': "рациона"
+        }
+        product_name = product_names.get(product_type, "рациона")
         await bot.send_message(
             chat_id=user_id,
             text=(
@@ -3960,6 +3980,7 @@ async def show_user_card(message_or_callback, user: dict):
     has_paid = user.get('has_paid', 0)
     has_paid_fmd = user.get('has_paid_fmd', 0)
     has_paid_bundle = user.get('has_paid_bundle', 0)
+    has_paid_dry = user.get('has_paid_dry', 0)
     created_at = user.get('created_at', '')
 
     # Формируем ссылку на пользователя
@@ -3985,6 +4006,11 @@ async def show_user_card(message_or_callback, user: dict):
     else:
         status_lines.append("🎁 Комплект: ❌ Не оплачено")
 
+    if has_paid_dry:
+        status_lines.append("🔥 Сушка: ✅ Оплачено")
+    else:
+        status_lines.append("🔥 Сушка: ❌ Не оплачено")
+
     status_text = "\n".join(status_lines)
 
     text = (
@@ -3997,7 +4023,7 @@ async def show_user_card(message_or_callback, user: dict):
     )
 
     keyboard = get_user_view_keyboard(user_id, bool(
-        has_paid), bool(has_paid_fmd), bool(has_paid_bundle))
+        has_paid), bool(has_paid_fmd), bool(has_paid_bundle), bool(has_paid_dry))
 
     if hasattr(message_or_callback, 'edit_text'):
         # Это CallbackQuery.message
@@ -4033,13 +4059,14 @@ async def user_list_view(callback: CallbackQuery, callback_data: UserListCallbac
         'all': '👥 Все пользователи',
         'paid_main': '💰 Оплатившие рационы',
         'paid_fmd': '🥗 Оплатившие FMD',
-        'paid_bundle': '🎁 Оплатившие комплект'
+        'paid_bundle': '🎁 Оплатившие комплект',
+        'paid_dry': '🔥 Оплатившие Сушку'
     }
 
     await callback.message.edit_text(
         f"<b>{filter_names.get(filter_type, 'Пользователи')}</b>\n\n"
         f"Всего: {len(users)}\n\n"
-        "💰 = Рационы | 🥗 = FMD | 🎁 = Комплект | ⚪ = Не оплачено",
+        "💰 = Рационы | 🥗 = FMD | 🎁 = Комплект | 🔥 = Сушка | ⚪ = Не оплачено",
         reply_markup=get_user_list_keyboard(
             users, page=0, filter_type=filter_type),
         parse_mode=ParseMode.HTML
@@ -4063,13 +4090,14 @@ async def user_list_page(callback: CallbackQuery, callback_data: UserListCallbac
         'paid_main': '💰 Оплатившие рационы',
         'paid_fmd': '🥗 Оплатившие FMD',
         'paid_bundle': '🎁 Оплатившие комплект',
+        'paid_dry': '🔥 Оплатившие Сушку',
         'search': '🔍 Результаты поиска'
     }
 
     await callback.message.edit_text(
         f"<b>{filter_names.get(filter_type, 'Пользователи')}</b>\n\n"
         f"Всего: {len(users)}\n\n"
-        "💰 = Рационы | 🥗 = FMD | 🎁 = Комплект | ⚪ = Не оплачено",
+        "💰 = Рационы | 🥗 = FMD | 🎁 = Комплект | 🔥 = Сушка | ⚪ = Не оплачено",
         reply_markup=get_user_list_keyboard(
             users, page=page, filter_type=filter_type),
         parse_mode=ParseMode.HTML
@@ -4267,6 +4295,56 @@ async def user_confirm_reset_bundle(callback: CallbackQuery, callback_data: User
         logger.info(
             f"Payment reset (bundle) for user {user_id} by {callback.from_user.username}")
         await callback.answer("✅ Оплата комплекта сброшена!", show_alert=True)
+
+        user = await db.get_user(user_id)
+        if user:
+            await show_user_card(callback.message, user)
+    else:
+        await callback.answer("❌ Ошибка сброса", show_alert=True)
+
+
+@router.callback_query(UserActionCallback.filter(F.action == "reset_dry"))
+async def user_reset_dry_confirm(callback: CallbackQuery, callback_data: UserActionCallback):
+    """Подтверждение сброса оплаты Сушки"""
+    if not is_admin(callback.from_user.username):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    user = await db.get_user(user_id)
+
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+
+    username = user.get('username')
+    first_name = user.get('first_name', 'Без имени')
+    user_display = f"@{username}" if username else first_name
+
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтверждение сброса</b>\n\n"
+        f"Вы уверены, что хотите сбросить оплату <b>Сушки</b> для пользователя {user_display}?\n\n"
+        f"ID: <code>{user_id}</code>",
+        reply_markup=get_user_confirm_reset_keyboard(user_id, "dry"),
+        parse_mode=ParseMode.HTML
+    )
+    await callback.answer()
+
+
+@router.callback_query(UserActionCallback.filter(F.action == "confirm_dry"))
+async def user_confirm_reset_dry(callback: CallbackQuery, callback_data: UserActionCallback):
+    """Выполнить сброс оплаты Сушки"""
+    if not is_admin(callback.from_user.username):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    success = await db.reset_user_payment(user_id, 'dry')
+
+    if success:
+        logger.info(
+            f"Payment reset (dry) for user {user_id} by {callback.from_user.username}")
+        await callback.answer("✅ Оплата Сушки сброшена!", show_alert=True)
 
         user = await db.get_user(user_id)
         if user:

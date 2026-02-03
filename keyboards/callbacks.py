@@ -16,6 +16,21 @@ class BundlePaymentCallback(CallbackData, prefix="bundle_pay"):
     pass
 
 
+class DryPaymentCallback(CallbackData, prefix="dry_pay"):
+    """Callback для кнопки 'Я оплатил(а)' (Сушка)"""
+    pass
+
+
+class DryDayCallback(CallbackData, prefix="dry_day"):
+    """Callback для выбора дня Сушки"""
+    day: int
+
+
+class DryInfoCallback(CallbackData, prefix="dry_info"):
+    """Callback для показа информации о Сушке"""
+    info_type: str  # 'shopping_list' или 'about'
+
+
 class FMDDayCallback(CallbackData, prefix="fmd_day"):
     """Callback для выбора дня FMD протокола"""
     day: int
@@ -27,8 +42,8 @@ class FMDInfoCallback(CallbackData, prefix="fmd_info"):
 
 
 class ProductSelectCallback(CallbackData, prefix="product"):
-    """Callback для выбора продукта (рацион или FMD)"""
-    product: str  # 'main' или 'fmd'
+    """Callback для выбора продукта (рацион, FMD или Сушка)"""
+    product: str  # 'main', 'fmd' или 'dry'
 
 
 class BackToProductsCallback(CallbackData, prefix="back_products"):
@@ -41,7 +56,7 @@ class AdminCallback(CallbackData, prefix="admin"):
     action: str  # approve / reject
     user_id: int
     request_id: int
-    product_type: str = 'main'  # 'main' или 'fmd'
+    product_type: str = 'main'  # 'main', 'fmd', 'bundle' или 'dry'
 
 
 class CaloriesCallback(CallbackData, prefix="cal"):
@@ -273,12 +288,12 @@ class UserListCallback(CallbackData, prefix="user_list"):
     action: str  # view / page
     user_id: int = 0
     page: int = 0
-    payment_filter: str = "all"  # all / paid_main / paid_fmd / paid_bundle
+    payment_filter: str = "all"  # all / paid_main / paid_fmd / paid_bundle / paid_dry
 
 
 class UserActionCallback(CallbackData, prefix="user_act"):
     """Callback для действий над пользователем"""
-    action: str  # reset_main / reset_fmd / reset_bundle / reset_all / view / back
+    action: str  # reset_main / reset_fmd / reset_bundle / reset_dry / reset_all / view / back
     user_id: int
 
 

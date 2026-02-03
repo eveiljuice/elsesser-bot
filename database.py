@@ -37,7 +37,7 @@ async def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Миграция: добавляем поля для FMD если их нет
         try:
             await db.execute('ALTER TABLE users ADD COLUMN has_paid_fmd INTEGER DEFAULT 0')
@@ -55,6 +55,15 @@ async def init_db():
             await db.execute('ALTER TABLE users ADD COLUMN bundle_payment_request_date TEXT')
         except:
             pass  # Колонка уже существует
+        # Миграция: добавляем поля для Сушки если их нет
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN has_paid_dry INTEGER DEFAULT 0')
+        except:
+            pass  # Колонка уже существует
+        try:
+            await db.execute('ALTER TABLE users ADD COLUMN dry_payment_request_date TEXT')
+        except:
+            pass  # Колонка уже существует
         await db.execute('''
             CREATE TABLE IF NOT EXISTS payment_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +75,7 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
-        
+
         # Миграция: добавляем product_type если его нет
         try:
             await db.execute("ALTER TABLE payment_requests ADD COLUMN product_type TEXT DEFAULT 'main'")
@@ -108,7 +117,7 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
-        
+
         # ==================== Таблица событий для аналитики ====================
         await db.execute('''
             CREATE TABLE IF NOT EXISTS user_events (
@@ -120,7 +129,7 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
-        
+
         # ==================== Таблица follow-up сообщений ====================
         await db.execute('''
             CREATE TABLE IF NOT EXISTS followup_messages (
@@ -134,19 +143,19 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
-        
+
         # Индекс для быстрого поиска событий по типу
         await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_user_events_type 
             ON user_events(event_type, created_at)
         ''')
-        
+
         # Индекс для follow-up сообщений
         await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_followup_pending 
             ON followup_messages(status, scheduled_at)
         ''')
-        
+
         # ==================== Таблица рассылок ====================
         await db.execute('''
             CREATE TABLE IF NOT EXISTS broadcasts (
@@ -166,7 +175,7 @@ async def init_db():
                 sent_at TEXT
             )
         ''')
-        
+
         # Миграция: добавляем поля для медиа и кнопок если их нет
         try:
             await db.execute('ALTER TABLE broadcasts ADD COLUMN media_type TEXT')
@@ -180,13 +189,13 @@ async def init_db():
             await db.execute('ALTER TABLE broadcasts ADD COLUMN buttons TEXT')
         except:
             pass
-        
+
         # Индекс для поиска pending рассылок
         await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_broadcasts_pending 
             ON broadcasts(status, scheduled_at)
         ''')
-        
+
         # ==================== Таблица шаблонов рассылок ====================
         await db.execute('''
             CREATE TABLE IF NOT EXISTS broadcast_templates (
@@ -201,7 +210,7 @@ async def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Миграция: добавляем поля для медиа и кнопок если их нет
         try:
             await db.execute('ALTER TABLE broadcast_templates ADD COLUMN media_type TEXT')
@@ -215,7 +224,7 @@ async def init_db():
             await db.execute('ALTER TABLE broadcast_templates ADD COLUMN buttons TEXT')
         except:
             pass
-        
+
         # ==================== Таблица автоматических рассылок ====================
         await db.execute('''
             CREATE TABLE IF NOT EXISTS auto_broadcasts (
@@ -233,7 +242,7 @@ async def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Миграция: добавляем поля для медиа и кнопок если их нет
         try:
             await db.execute('ALTER TABLE auto_broadcasts ADD COLUMN media_type TEXT')
@@ -247,7 +256,7 @@ async def init_db():
             await db.execute('ALTER TABLE auto_broadcasts ADD COLUMN buttons TEXT')
         except:
             pass
-        
+
         # Таблица для отслеживания уже отправленных авто-рассылок
         await db.execute('''
             CREATE TABLE IF NOT EXISTS auto_broadcast_sent (
@@ -260,7 +269,7 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         ''')
-        
+
         await db.commit()
 
 
@@ -340,7 +349,7 @@ async def check_bundle_payment_status(user_id: int) -> bool:
 
 async def set_bundle_payment_status(user_id: int, status: bool):
     """Установить статус оплаты комплекта (Рационы + FMD)
-    
+
     При активации комплекта также активирует доступ к основным рационам и FMD
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -358,10 +367,30 @@ async def set_bundle_payment_status(user_id: int, status: bool):
         await db.commit()
 
 
+async def check_dry_payment_status(user_id: int) -> bool:
+    """Проверить статус оплаты Сушки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        async with db.execute(
+            'SELECT has_paid_dry FROM users WHERE user_id = ?', (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
+
+
+async def set_dry_payment_status(user_id: int, status: bool):
+    """Установить статус оплаты Сушки"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        await db.execute(
+            'UPDATE users SET has_paid_dry = ? WHERE user_id = ?',
+            (1 if status else 0, user_id)
+        )
+        await db.commit()
+
+
 async def create_payment_request(user_id: int, admin_message_id: int, product_type: str = 'main') -> int:
     """Создать запрос на оплату, вернуть ID запроса
-    
-    product_type: 'main' - основной рацион, 'fmd' - FMD протокол, 'bundle' - комплект
+
+    product_type: 'main' - основной рацион, 'fmd' - FMD протокол, 'bundle' - комплект, 'dry' - Сушка
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         # Обновляем дату запроса у пользователя
@@ -373,6 +402,11 @@ async def create_payment_request(user_id: int, admin_message_id: int, product_ty
         elif product_type == 'bundle':
             await db.execute(
                 'UPDATE users SET bundle_payment_request_date = ? WHERE user_id = ?',
+                (datetime.now().isoformat(), user_id)
+            )
+        elif product_type == 'dry':
+            await db.execute(
+                'UPDATE users SET dry_payment_request_date = ? WHERE user_id = ?',
                 (datetime.now().isoformat(), user_id)
             )
         else:
@@ -412,7 +446,7 @@ async def update_payment_request(request_id: int, status: str):
 
 async def has_pending_request(user_id: int, product_type: str = None) -> bool:
     """Проверить, есть ли у пользователя необработанный запрос
-    
+
     product_type: None - любой продукт, 'main' - основной рацион, 'fmd' - FMD протокол
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -551,31 +585,32 @@ async def log_event(user_id: int, event_type: str, metadata: str = None):
             await db.commit()
     except Exception as e:
         # Логирование не критично - не ломаем работу бота
-        logger.warning(f"Failed to log event {event_type} for user {user_id}: {e}")
+        logger.warning(
+            f"Failed to log event {event_type} for user {user_id}: {e}")
 
 
 async def get_stats() -> Dict:
     """Получить расширенную статистику для админки"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         stats = {}
-        
+
         # 1. Всего пользователей
         async with db.execute('SELECT COUNT(*) FROM users') as cursor:
             row = await cursor.fetchone()
             stats['total_users'] = row[0] if row else 0
-        
+
         # 2. Оплатившие пользователи
         async with db.execute('SELECT COUNT(*) FROM users WHERE has_paid = 1') as cursor:
             row = await cursor.fetchone()
             stats['paid_users'] = row[0] if row else 0
-        
+
         # 3. Пользователи с pending запросом
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM payment_requests WHERE status = 'pending'"
         ) as cursor:
             row = await cursor.fetchone()
             stats['pending_payments'] = row[0] if row else 0
-        
+
         # 4. Сколько нажали /start
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ?",
@@ -583,7 +618,7 @@ async def get_stats() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             stats['started_users'] = row[0] if row else 0
-        
+
         # 5. Сколько нажали "Я оплатил(а)"
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ?",
@@ -591,7 +626,7 @@ async def get_stats() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             stats['clicked_payment_btn'] = row[0] if row else 0
-        
+
         # 6. Сколько прислали скриншот
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ?",
@@ -599,7 +634,7 @@ async def get_stats() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             stats['sent_screenshot'] = row[0] if row else 0
-        
+
         # 7. Пользователи, которые ТОЛЬКО нажали /start (ничего больше не делали)
         async with db.execute('''
             SELECT COUNT(*) FROM users u
@@ -612,7 +647,7 @@ async def get_stats() -> Dict:
         ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
             row = await cursor.fetchone()
             stats['only_start'] = row[0] if row else 0
-        
+
         # 8. Пользователи, которые нажали "Я оплатил(а)" но НЕ прислали скрин
         async with db.execute('''
             SELECT COUNT(DISTINCT e1.user_id) FROM user_events e1
@@ -625,7 +660,7 @@ async def get_stats() -> Dict:
         ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
             row = await cursor.fetchone()
             stats['clicked_but_no_screenshot'] = row[0] if row else 0
-            
+
         # 9. Статистика за последние 7 дней
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
         async with db.execute(
@@ -633,30 +668,30 @@ async def get_stats() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             stats['new_users_7d'] = row[0] if row else 0
-            
+
         async with db.execute('''
             SELECT COUNT(*) FROM users 
             WHERE has_paid = 1 AND payment_request_date >= ?
         ''', (week_ago,)) as cursor:
             row = await cursor.fetchone()
             stats['paid_7d'] = row[0] if row else 0
-        
+
         # ==================== Follow-up статистика ====================
-        
+
         # 10. Всего отправлено follow-up сообщений
         async with db.execute(
             "SELECT COUNT(*) FROM followup_messages WHERE status = 'sent'"
         ) as cursor:
             row = await cursor.fetchone()
             stats['followup_sent'] = row[0] if row else 0
-        
+
         # 11. Уникальных пользователей получили follow-up
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM followup_messages WHERE status = 'sent'"
         ) as cursor:
             row = await cursor.fetchone()
             stats['followup_users'] = row[0] if row else 0
-        
+
         # 12. Оплатили ПОСЛЕ получения follow-up
         # (пользователь получил follow-up и потом оплатил)
         async with db.execute('''
@@ -669,7 +704,7 @@ async def get_stats() -> Dict:
         ''') as cursor:
             row = await cursor.fetchone()
             stats['paid_after_followup'] = row[0] if row else 0
-        
+
         # 13. Проигнорировали follow-up (получили, но не оплатили)
         async with db.execute('''
             SELECT COUNT(DISTINCT f.user_id) 
@@ -680,7 +715,7 @@ async def get_stats() -> Dict:
         ''') as cursor:
             row = await cursor.fetchone()
             stats['ignored_followup'] = row[0] if row else 0
-        
+
         # 14. Статистика по типам follow-up
         async with db.execute('''
             SELECT message_type, COUNT(*) as cnt
@@ -690,21 +725,21 @@ async def get_stats() -> Dict:
         ''') as cursor:
             rows = await cursor.fetchall()
             stats['followup_by_type'] = {row[0]: row[1] for row in rows}
-        
+
         return stats
 
 
 async def get_users_for_followup(followup_type: str) -> List[Dict]:
     """
     Получить пользователей для follow-up сообщений
-    
+
     followup_type:
     - 'only_start': нажали /start более 24ч назад и ничего не делали
     - 'clicked_payment': нажали "Я оплатил(а)" более 2ч назад, но не прислали скрин
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if followup_type == 'only_start':
             # Пользователи, которые нажали /start 24+ часов назад и ничего не делали
             cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
@@ -727,7 +762,7 @@ async def get_users_for_followup(followup_type: str) -> List[Dict]:
             ''', (cutoff, EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-                
+
         elif followup_type == 'clicked_payment':
             # Пользователи, которые нажали "Я оплатил(а)" 2+ часа назад, но не прислали скрин
             cutoff = (datetime.now() - timedelta(hours=2)).isoformat()
@@ -752,7 +787,7 @@ async def get_users_for_followup(followup_type: str) -> List[Dict]:
             ''', (EventType.PAYMENT_BUTTON_CLICKED, cutoff, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         return []
 
 
@@ -812,28 +847,28 @@ async def get_weekly_report() -> Dict:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         report = {}
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        
+
         # === ОБЩАЯ СТАТИСТИКА ===
-        
+
         # Всего пользователей
         async with db.execute('SELECT COUNT(*) FROM users') as cursor:
             row = await cursor.fetchone()
             report['total_users'] = row[0] if row else 0
-        
+
         # Всего оплативших
         async with db.execute('SELECT COUNT(*) FROM users WHERE has_paid = 1') as cursor:
             row = await cursor.fetchone()
             report['total_paid'] = row[0] if row else 0
-        
+
         # === СТАТИСТИКА ЗА НЕДЕЛЮ ===
-        
+
         # Новых пользователей за неделю
         async with db.execute(
             'SELECT COUNT(*) FROM users WHERE created_at >= ?', (week_ago,)
         ) as cursor:
             row = await cursor.fetchone()
             report['new_users_week'] = row[0] if row else 0
-        
+
         # Оплатили за неделю
         async with db.execute('''
             SELECT COUNT(*) FROM users 
@@ -841,39 +876,39 @@ async def get_weekly_report() -> Dict:
         ''', (week_ago,)) as cursor:
             row = await cursor.fetchone()
             report['paid_week'] = row[0] if row else 0
-        
+
         # Всего запросов на оплату за неделю
         async with db.execute(
             "SELECT COUNT(*) FROM payment_requests WHERE created_at >= ?", (week_ago,)
         ) as cursor:
             row = await cursor.fetchone()
             report['payment_requests_week'] = row[0] if row else 0
-        
+
         # Одобрено за неделю
         async with db.execute(
-            "SELECT COUNT(*) FROM payment_requests WHERE status = 'approved' AND created_at >= ?", 
+            "SELECT COUNT(*) FROM payment_requests WHERE status = 'approved' AND created_at >= ?",
             (week_ago,)
         ) as cursor:
             row = await cursor.fetchone()
             report['approved_week'] = row[0] if row else 0
-        
+
         # Отклонено за неделю
         async with db.execute(
-            "SELECT COUNT(*) FROM payment_requests WHERE status = 'rejected' AND created_at >= ?", 
+            "SELECT COUNT(*) FROM payment_requests WHERE status = 'rejected' AND created_at >= ?",
             (week_ago,)
         ) as cursor:
             row = await cursor.fetchone()
             report['rejected_week'] = row[0] if row else 0
-        
+
         # Ожидают проверки (всего)
         async with db.execute(
             "SELECT COUNT(*) FROM payment_requests WHERE status = 'pending'"
         ) as cursor:
             row = await cursor.fetchone()
             report['pending_now'] = row[0] if row else 0
-        
+
         # === ВОРОНКА ЗА НЕДЕЛЮ ===
-        
+
         # Нажали /start за неделю
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ? AND created_at >= ?",
@@ -881,7 +916,7 @@ async def get_weekly_report() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             report['started_week'] = row[0] if row else 0
-        
+
         # Нажали "Я оплатила" за неделю
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ? AND created_at >= ?",
@@ -889,7 +924,7 @@ async def get_weekly_report() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             report['clicked_payment_week'] = row[0] if row else 0
-        
+
         # Прислали скриншот за неделю
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM user_events WHERE event_type = ? AND created_at >= ?",
@@ -897,9 +932,9 @@ async def get_weekly_report() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             report['screenshot_week'] = row[0] if row else 0
-        
+
         # === FOLLOW-UP СТАТИСТИКА ЗА НЕДЕЛЮ ===
-        
+
         # Отправлено follow-up за неделю
         async with db.execute(
             "SELECT COUNT(*) FROM followup_messages WHERE status = 'sent' AND sent_at >= ?",
@@ -907,7 +942,7 @@ async def get_weekly_report() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             report['followup_sent_week'] = row[0] if row else 0
-        
+
         # Оплатили после follow-up за неделю
         async with db.execute('''
             SELECT COUNT(DISTINCT f.user_id) 
@@ -920,9 +955,9 @@ async def get_weekly_report() -> Dict:
         ''', (week_ago,)) as cursor:
             row = await cursor.fetchone()
             report['paid_after_followup_week'] = row[0] if row else 0
-        
+
         # === КАЛЬКУЛЯТОР ЗА НЕДЕЛЮ ===
-        
+
         # Прошли калькулятор за неделю
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM calculator_results WHERE created_at >= ?",
@@ -930,9 +965,9 @@ async def get_weekly_report() -> Dict:
         ) as cursor:
             row = await cursor.fetchone()
             report['calculator_completed_week'] = row[0] if row else 0
-        
+
         # === ПОТЕРЯННЫЕ КЛИЕНТЫ ===
-        
+
         # Только /start (ничего не делали) — всего
         async with db.execute('''
             SELECT COUNT(*) FROM users u
@@ -945,7 +980,7 @@ async def get_weekly_report() -> Dict:
         ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
             row = await cursor.fetchone()
             report['only_start_total'] = row[0] if row else 0
-        
+
         # Нажали оплату, но без скрина — всего
         async with db.execute('''
             SELECT COUNT(DISTINCT e1.user_id) FROM user_events e1
@@ -958,9 +993,9 @@ async def get_weekly_report() -> Dict:
         ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
             row = await cursor.fetchone()
             report['clicked_no_screenshot_total'] = row[0] if row else 0
-        
+
         # === ТОП ДНЕЙ НЕДЕЛИ ПО ОПЛАТАМ ===
-        
+
         async with db.execute('''
             SELECT strftime('%w', payment_request_date) as weekday, COUNT(*) as cnt
             FROM users 
@@ -970,20 +1005,20 @@ async def get_weekly_report() -> Dict:
         ''', (week_ago,)) as cursor:
             rows = await cursor.fetchall()
             weekdays_map = {
-                '0': 'Вс', '1': 'Пн', '2': 'Вт', '3': 'Ср', 
+                '0': 'Вс', '1': 'Пн', '2': 'Вт', '3': 'Ср',
                 '4': 'Чт', '5': 'Пт', '6': 'Сб'
             }
             report['payments_by_weekday'] = {
                 weekdays_map.get(row[0], row[0]): row[1] for row in rows
             }
-        
+
         return report
 
 
 async def get_users_by_status(status_type: str) -> List[Dict]:
     """
     Получить список пользователей по статусу для детальной статистики
-    
+
     status_type:
     - 'paid': оплатившие пользователи
     - 'pending': ожидают проверки оплаты
@@ -994,7 +1029,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if status_type == 'paid':
             # Оплатившие пользователи
             async with db.execute('''
@@ -1005,7 +1040,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif status_type == 'pending':
             # Пользователи с pending запросами на оплату
             async with db.execute('''
@@ -1017,7 +1052,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif status_type == 'rejected':
             # Пользователи с отклонёнными запросами
             async with db.execute('''
@@ -1030,7 +1065,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif status_type == 'only_start':
             # Пользователи, которые только нажали /start (ничего не делали)
             async with db.execute('''
@@ -1046,7 +1081,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif status_type == 'clicked_no_screenshot':
             # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
             async with db.execute('''
@@ -1064,7 +1099,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif status_type == 'all_users':
             # Все пользователи
             async with db.execute('''
@@ -1074,7 +1109,7 @@ async def get_users_by_status(status_type: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         return []
 
 
@@ -1172,7 +1207,7 @@ async def cancel_broadcast(broadcast_id: int) -> bool:
 async def get_broadcast_audience_users(audience: str) -> List[Dict]:
     """
     Получить пользователей для рассылки по типу аудитории
-    
+
     audience:
     - 'all': все пользователи
     - 'start_only': только нажали /start (ничего не делали)
@@ -1181,7 +1216,7 @@ async def get_broadcast_audience_users(audience: str) -> List[Dict]:
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if audience == 'all':
             # Все пользователи
             async with db.execute('''
@@ -1190,7 +1225,7 @@ async def get_broadcast_audience_users(audience: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif audience == 'start_only':
             # Пользователи, которые только нажали /start (ничего не делали)
             async with db.execute('''
@@ -1205,7 +1240,7 @@ async def get_broadcast_audience_users(audience: str) -> List[Dict]:
             ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif audience == 'rejected':
             # Пользователи с отклонёнными запросами (и не оплатившие после)
             async with db.execute('''
@@ -1217,7 +1252,7 @@ async def get_broadcast_audience_users(audience: str) -> List[Dict]:
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif audience == 'no_screenshot':
             # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
             async with db.execute('''
@@ -1234,7 +1269,7 @@ async def get_broadcast_audience_users(audience: str) -> List[Dict]:
             ''', (EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         return []
 
 
@@ -1269,7 +1304,7 @@ async def get_templates(created_by: int = None) -> List[Dict]:
     """Получить все шаблоны (или только конкретного пользователя)"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if created_by:
             async with db.execute('''
                 SELECT * FROM broadcast_templates 
@@ -1334,7 +1369,7 @@ async def get_auto_broadcasts(active_only: bool = False) -> List[Dict]:
     """Получить все автоматические рассылки"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if active_only:
             async with db.execute('''
                 SELECT * FROM auto_broadcasts 
@@ -1373,9 +1408,9 @@ async def toggle_auto_broadcast(auto_id: int) -> bool:
             row = await cursor.fetchone()
             if not row:
                 return False
-            
+
             new_status = 0 if row[0] else 1
-        
+
         await db.execute('''
             UPDATE auto_broadcasts SET is_active = ? WHERE id = ?
         ''', (new_status, auto_id))
@@ -1390,7 +1425,7 @@ async def delete_auto_broadcast(auto_id: int) -> bool:
         await db.execute('''
             DELETE FROM auto_broadcast_sent WHERE auto_broadcast_id = ?
         ''', (auto_id,))
-        
+
         cursor = await db.execute('''
             DELETE FROM auto_broadcasts WHERE id = ?
         ''', (auto_id,))
@@ -1435,7 +1470,7 @@ async def is_auto_broadcast_sent(auto_id: int, user_id: int) -> bool:
 async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int) -> List[Dict]:
     """
     Получить пользователей, подходящих для автоматической рассылки
-    
+
     trigger_type:
     - 'only_start': только нажали /start, прошло delay_hours часов
     - 'no_payment': нажали оплатить, но не оплатили, прошло delay_hours часов
@@ -1444,10 +1479,10 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         threshold_time = datetime.now() - timedelta(hours=delay_hours)
         threshold_str = threshold_time.strftime('%Y-%m-%d %H:%M:%S')
-        
+
         if trigger_type == 'only_start':
             # Пользователи, которые только нажали /start и больше ничего не делали
             async with db.execute('''
@@ -1463,7 +1498,7 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
             ''', (threshold_str, EventType.PAYMENT_BUTTON_CLICKED, EventType.SCREENSHOT_SENT, EventType.CALCULATOR_STARTED)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif trigger_type == 'no_payment':
             # Пользователи, которые нажали оплатить, но не оплатили
             async with db.execute('''
@@ -1476,7 +1511,7 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
             ''', (EventType.PAYMENT_BUTTON_CLICKED, threshold_str)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif trigger_type == 'rejected':
             # Пользователи с отклонёнными запросами
             async with db.execute('''
@@ -1489,7 +1524,7 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
             ''', (threshold_str,)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif trigger_type == 'no_screenshot':
             # Пользователи, которые нажали "Я оплатил(а)" но не прислали скрин
             async with db.execute('''
@@ -1507,7 +1542,7 @@ async def get_auto_broadcast_eligible_users(trigger_type: str, delay_hours: int)
             ''', (EventType.PAYMENT_BUTTON_CLICKED, threshold_str, EventType.SCREENSHOT_SENT)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         return []
 
 
@@ -1529,7 +1564,7 @@ async def init_chain_tables():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Таблица шагов цепочки
         await db.execute('''
             CREATE TABLE IF NOT EXISTS chain_steps (
@@ -1545,7 +1580,7 @@ async def init_chain_tables():
                 UNIQUE(chain_id, step_order)
             )
         ''')
-        
+
         # Таблица кнопок шага (с действиями)
         await db.execute('''
             CREATE TABLE IF NOT EXISTS chain_step_buttons (
@@ -1561,7 +1596,7 @@ async def init_chain_tables():
                 FOREIGN KEY(next_step_id) REFERENCES chain_steps(id) ON DELETE SET NULL
             )
         ''')
-        
+
         # Таблица состояния пользователя в цепочке
         await db.execute('''
             CREATE TABLE IF NOT EXISTS chain_user_state (
@@ -1579,7 +1614,7 @@ async def init_chain_tables():
                 UNIQUE(user_id, chain_id)
             )
         ''')
-        
+
         # Таблица истории отправок цепочки
         await db.execute('''
             CREATE TABLE IF NOT EXISTS chain_message_history (
@@ -1594,18 +1629,18 @@ async def init_chain_tables():
                 FOREIGN KEY(step_id) REFERENCES chain_steps(id) ON DELETE CASCADE
             )
         ''')
-        
+
         # Индексы
         await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_chain_user_state_active 
             ON chain_user_state(status, next_message_at)
         ''')
-        
+
         await db.execute('''
             CREATE INDEX IF NOT EXISTS idx_chain_steps_order 
             ON chain_steps(chain_id, step_order)
         ''')
-        
+
         await db.commit()
 
 
@@ -1659,13 +1694,13 @@ async def update_chain(chain_id: int, **kwargs) -> bool:
     """Обновить цепочку"""
     allowed_fields = ['name', 'description', 'trigger_type', 'is_active']
     fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
-    
+
     if not fields:
         return False
-    
+
     set_clause = ', '.join([f"{k} = ?" for k in fields.keys()])
     values = list(fields.values()) + [chain_id]
-    
+
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute(f'''
             UPDATE broadcast_chains SET {set_clause} WHERE id = ?
@@ -1694,7 +1729,7 @@ async def toggle_chain_active(chain_id: int) -> bool:
             if not row:
                 return False
             new_status = 0 if row[0] else 1
-        
+
         await db.execute('''
             UPDATE broadcast_chains SET is_active = ? WHERE id = ?
         ''', (new_status, chain_id))
@@ -1770,15 +1805,16 @@ async def get_next_chain_step(chain_id: int, current_order: int) -> Optional[Dic
 
 async def update_chain_step(step_id: int, **kwargs) -> bool:
     """Обновить шаг цепочки"""
-    allowed_fields = ['content', 'media_type', 'media_file_id', 'delay_hours', 'step_order']
+    allowed_fields = ['content', 'media_type',
+                      'media_file_id', 'delay_hours', 'step_order']
     fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
-    
+
     if not fields:
         return False
-    
+
     set_clause = ', '.join([f"{k} = ?" for k in fields.keys()])
     values = list(fields.values()) + [step_id]
-    
+
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute(f'''
             UPDATE chain_steps SET {set_clause} WHERE id = ?
@@ -1894,7 +1930,7 @@ async def start_chain_for_user(user_id: int, chain_id: int, first_step_id: int) 
                     ''', (first_step_id, now, now, now, state_id))
                     await db.commit()
                     return state_id
-        
+
         # Создаём новую запись
         cursor = await db.execute('''
             INSERT INTO chain_user_state (user_id, chain_id, current_step_id, status, started_at, last_action_at, next_message_at)
@@ -1939,27 +1975,27 @@ async def update_user_chain_state(
     """Обновить состояние пользователя в цепочке"""
     updates = []
     values = []
-    
+
     if current_step_id is not None:
         updates.append("current_step_id = ?")
         values.append(current_step_id)
-    
+
     if status is not None:
         updates.append("status = ?")
         values.append(status)
-    
+
     if next_message_at is not None:
         updates.append("next_message_at = ?")
         values.append(next_message_at.isoformat())
-    
+
     updates.append("last_action_at = ?")
     values.append(datetime.now().isoformat())
-    
+
     if not updates:
         return False
-    
+
     values.extend([user_id, chain_id])
-    
+
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute(f'''
             UPDATE chain_user_state SET {', '.join(updates)} WHERE user_id = ? AND chain_id = ?
@@ -2015,7 +2051,7 @@ async def get_all_users() -> List[Dict]:
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute('''
-            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
             FROM users
             ORDER BY created_at DESC
         ''') as cursor:
@@ -2026,46 +2062,57 @@ async def get_all_users() -> List[Dict]:
 async def get_users_by_payment_filter(filter_type: str) -> List[Dict]:
     """
     Получить пользователей по фильтру оплаты
-    
+
     filter_type:
     - 'all': все пользователи
     - 'paid_main': оплатившие основной рацион
     - 'paid_fmd': оплатившие FMD протокол
     - 'paid_bundle': оплатившие комплект
+    - 'paid_dry': оплатившие Сушку
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         if filter_type == 'paid_main':
             async with db.execute('''
-                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
                 FROM users
                 WHERE has_paid = 1
                 ORDER BY created_at DESC
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif filter_type == 'paid_fmd':
             async with db.execute('''
-                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
                 FROM users
                 WHERE has_paid_fmd = 1
                 ORDER BY created_at DESC
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
         elif filter_type == 'paid_bundle':
             async with db.execute('''
-                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
                 FROM users
                 WHERE has_paid_bundle = 1
                 ORDER BY created_at DESC
             ''') as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-        
+
+        elif filter_type == 'paid_dry':
+            async with db.execute('''
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
+                FROM users
+                WHERE has_paid_dry = 1
+                ORDER BY created_at DESC
+            ''') as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
         else:  # 'all'
             return await get_all_users()
 
@@ -2073,11 +2120,12 @@ async def get_users_by_payment_filter(filter_type: str) -> List[Dict]:
 async def reset_user_payment(user_id: int, payment_type: str) -> bool:
     """
     Сбросить оплату пользователя
-    
+
     payment_type:
     - 'main': сбросить оплату основного рациона
     - 'fmd': сбросить оплату FMD протокола
     - 'bundle': сбросить оплату комплекта
+    - 'dry': сбросить оплату Сушки
     - 'all': сбросить все оплаты
     """
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -2093,13 +2141,17 @@ async def reset_user_payment(user_id: int, payment_type: str) -> bool:
             cursor = await db.execute('''
                 UPDATE users SET has_paid_bundle = 0 WHERE user_id = ?
             ''', (user_id,))
+        elif payment_type == 'dry':
+            cursor = await db.execute('''
+                UPDATE users SET has_paid_dry = 0 WHERE user_id = ?
+            ''', (user_id,))
         elif payment_type == 'all':
             cursor = await db.execute('''
-                UPDATE users SET has_paid = 0, has_paid_fmd = 0, has_paid_bundle = 0 WHERE user_id = ?
+                UPDATE users SET has_paid = 0, has_paid_fmd = 0, has_paid_bundle = 0, has_paid_dry = 0 WHERE user_id = ?
             ''', (user_id,))
         else:
             return False
-        
+
         await db.commit()
         return cursor.rowcount > 0
 
@@ -2108,12 +2160,12 @@ async def search_user_by_username_or_id(query: str) -> List[Dict]:
     """Поиск пользователя по username или user_id"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
+
         # Попытка поиска по user_id (если запрос — число)
         try:
             user_id = int(query)
             async with db.execute('''
-                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+                SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
                 FROM users
                 WHERE user_id = ?
             ''', (user_id,)) as cursor:
@@ -2122,11 +2174,11 @@ async def search_user_by_username_or_id(query: str) -> List[Dict]:
                     return [dict(row) for row in rows]
         except ValueError:
             pass
-        
+
         # Поиск по username (без @)
         search_query = query.lstrip('@').lower()
         async with db.execute('''
-            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, created_at
+            SELECT user_id, username, first_name, has_paid, has_paid_fmd, has_paid_bundle, has_paid_dry, created_at
             FROM users
             WHERE LOWER(username) LIKE ? OR LOWER(first_name) LIKE ?
             ORDER BY created_at DESC
@@ -2140,40 +2192,40 @@ async def get_chain_stats(chain_id: int) -> Dict:
     """Получить статистику цепочки"""
     async with aiosqlite.connect(DATABASE_NAME) as db:
         stats = {}
-        
+
         # Всего пользователей запустили цепочку
         async with db.execute('''
             SELECT COUNT(DISTINCT user_id) FROM chain_user_state WHERE chain_id = ?
         ''', (chain_id,)) as cursor:
             row = await cursor.fetchone()
             stats['total_started'] = row[0] if row else 0
-        
+
         # Активных
         async with db.execute('''
             SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'active'
         ''', (chain_id,)) as cursor:
             row = await cursor.fetchone()
             stats['active'] = row[0] if row else 0
-        
+
         # Завершили
         async with db.execute('''
             SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'completed'
         ''', (chain_id,)) as cursor:
             row = await cursor.fetchone()
             stats['completed'] = row[0] if row else 0
-        
+
         # Остановили
         async with db.execute('''
             SELECT COUNT(*) FROM chain_user_state WHERE chain_id = ? AND status = 'stopped'
         ''', (chain_id,)) as cursor:
             row = await cursor.fetchone()
             stats['stopped'] = row[0] if row else 0
-        
+
         # Всего отправлено сообщений
         async with db.execute('''
             SELECT COUNT(*) FROM chain_message_history WHERE chain_id = ?
         ''', (chain_id,)) as cursor:
             row = await cursor.fetchone()
             stats['messages_sent'] = row[0] if row else 0
-        
+
         return stats

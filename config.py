@@ -15,6 +15,9 @@ FMD_PAYMENT_AMOUNT = os.getenv('FMD_PAYMENT_AMOUNT', '1190')
 # Комплект (Рационы + FMD со скидкой)
 BUNDLE_PAYMENT_AMOUNT = os.getenv('BUNDLE_PAYMENT_AMOUNT', '2990')
 
+# Сушка (14 дней, 1500 ккал)
+DRY_PAYMENT_AMOUNT = os.getenv('DRY_PAYMENT_AMOUNT', '3000')
+
 PAYMENT_DETAILS = os.getenv(
     'PAYMENT_DETAILS', 'Номер карты: 1234 5678 9012 3456\nПолучатель: Иванова Светлана')
 

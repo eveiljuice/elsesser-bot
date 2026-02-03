@@ -4,10 +4,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from keyboards.callbacks import (
     PaymentCallback, CaloriesCallback, DayCallback, BackCallback,
     FMDPaymentCallback, FMDDayCallback, ProductSelectCallback, BackToProductsCallback,
-    FMDInfoCallback, BundlePaymentCallback
+    FMDInfoCallback, BundlePaymentCallback, DryPaymentCallback, DryDayCallback, DryInfoCallback
 )
-from data.recipes import RECIPES, FMD_RECIPES
-from config import PAYMENT_AMOUNT, FMD_PAYMENT_AMOUNT
+from data.recipes import RECIPES, FMD_RECIPES, DRY_RECIPES
+from config import PAYMENT_AMOUNT, FMD_PAYMENT_AMOUNT, DRY_PAYMENT_AMOUNT
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -145,12 +145,13 @@ def get_back_to_fmd_days_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bundle: bool = False) -> InlineKeyboardMarkup:
-    """Клавиатура выбора продукта (основной рацион, FMD или комплект)
+def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bundle: bool = False, has_dry: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура выбора продукта (основной рацион, FMD, Сушка)
 
     has_main: True если оплачен основной рацион
     has_fmd: True если оплачен FMD протокол
     has_bundle: True если оплачен комплект
+    has_dry: True если оплачена Сушка
     """
     builder = InlineKeyboardBuilder()
 
@@ -176,5 +177,62 @@ def get_products_keyboard(has_main: bool = False, has_fmd: bool = False, has_bun
             callback_data=ProductSelectCallback(product="fmd")
         )
 
+    if has_dry:
+        builder.button(
+            text="🔥 Сушка (14 дней) ✅",
+            callback_data=ProductSelectCallback(product="dry")
+        )
+    else:
+        builder.button(
+            text=f"🔥 Сушка (14 дней) — {DRY_PAYMENT_AMOUNT} ₽",
+            callback_data=ProductSelectCallback(product="dry")
+        )
+
     builder.adjust(1)  # По 1 кнопке в ряд
+    return builder.as_markup()
+
+
+# ==================== Сушка ====================
+
+def get_dry_payment_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для оплаты Сушки"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Я оплатила", callback_data=DryPaymentCallback())
+    return builder.as_markup()
+
+
+def get_dry_days_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора дня Сушки"""
+    builder = InlineKeyboardBuilder()
+
+    # Информация о Сушке
+    builder.button(
+        text="ℹ️ О программе Сушка",
+        callback_data=DryInfoCallback(info_type="about")
+    )
+
+    for day in sorted(DRY_RECIPES.keys()):
+        builder.button(
+            text=f"📅 День {day}",
+            callback_data=DryDayCallback(day=day)
+        )
+
+    # Кнопка назад к выбору продукта
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=BackToProductsCallback()
+    )
+
+    # 1 инфо-кнопка, затем дни по 4 в ряд, кнопка назад
+    builder.adjust(1, 4, 4, 4, 2, 1)
+    return builder.as_markup()
+
+
+def get_back_to_dry_days_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой 'Назад к дням Сушки'"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="⬅️ Назад к дням Сушки",
+        callback_data=BackCallback(to="dry_days")
+    )
     return builder.as_markup()
