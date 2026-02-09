@@ -497,6 +497,7 @@ async def receive_payment_screenshot(message: Message, bot: Bot, state: FSMConte
         photo=photo_file_id,
         caption=(
             "🔔 <b>Новый запрос на проверку оплаты!</b>\n\n"
+            f"🍽 <b>Продукт: Калькулятор тела ({PAYMENT_AMOUNT} ₽)</b>\n\n"
             f"👤 Пользователь: {username_display}\n"
             f"📝 Имя: {user.first_name or 'Не указано'}\n"
             f"🆔 ID: <code>{user.id}</code>\n\n"

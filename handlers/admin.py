@@ -3809,6 +3809,7 @@ async def user_management_menu(message: Message, state: FSMContext):
     paid_main = len([u for u in all_users if u.get('has_paid')])
     paid_fmd = len([u for u in all_users if u.get('has_paid_fmd')])
     paid_bundle = len([u for u in all_users if u.get('has_paid_bundle')])
+    paid_dry = len([u for u in all_users if u.get('has_paid_dry')])
 
     await message.answer(
         "👥 <b>Управление пользователями</b>\n\n"
@@ -3816,7 +3817,8 @@ async def user_management_menu(message: Message, state: FSMContext):
         f"├ Всего пользователей: <b>{len(all_users)}</b>\n"
         f"├ 💰 Оплатили рационы: <b>{paid_main}</b>\n"
         f"├ 🥗 Оплатили FMD: <b>{paid_fmd}</b>\n"
-        f"└ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n\n"
+        f"├ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n"
+        f"└ 🔥 Оплатили Сушку: <b>{paid_dry}</b>\n\n"
         "Выберите действие:",
         reply_markup=get_user_management_menu(),
         parse_mode=ParseMode.HTML
@@ -3862,6 +3864,7 @@ async def user_back_to_menu(callback: CallbackQuery, state: FSMContext):
     paid_main = len([u for u in all_users if u.get('has_paid')])
     paid_fmd = len([u for u in all_users if u.get('has_paid_fmd')])
     paid_bundle = len([u for u in all_users if u.get('has_paid_bundle')])
+    paid_dry = len([u for u in all_users if u.get('has_paid_dry')])
 
     await callback.message.edit_text(
         "👥 <b>Управление пользователями</b>\n\n"
@@ -3869,7 +3872,8 @@ async def user_back_to_menu(callback: CallbackQuery, state: FSMContext):
         f"├ Всего пользователей: <b>{len(all_users)}</b>\n"
         f"├ 💰 Оплатили рационы: <b>{paid_main}</b>\n"
         f"├ 🥗 Оплатили FMD: <b>{paid_fmd}</b>\n"
-        f"└ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n\n"
+        f"├ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n"
+        f"└ 🔥 Оплатили Сушку: <b>{paid_dry}</b>\n\n"
         "Выберите действие:",
         reply_markup=get_user_management_menu(),
         parse_mode=ParseMode.HTML
@@ -3918,6 +3922,7 @@ async def user_search_cancel(message: Message, state: FSMContext):
     paid_main = len([u for u in all_users if u.get('has_paid')])
     paid_fmd = len([u for u in all_users if u.get('has_paid_fmd')])
     paid_bundle = len([u for u in all_users if u.get('has_paid_bundle')])
+    paid_dry = len([u for u in all_users if u.get('has_paid_dry')])
 
     await message.answer(
         "👥 <b>Управление пользователями</b>\n\n"
@@ -3925,7 +3930,8 @@ async def user_search_cancel(message: Message, state: FSMContext):
         f"├ Всего пользователей: <b>{len(all_users)}</b>\n"
         f"├ 💰 Оплатили рационы: <b>{paid_main}</b>\n"
         f"├ 🥗 Оплатили FMD: <b>{paid_fmd}</b>\n"
-        f"└ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n\n"
+        f"├ 🎁 Оплатили комплект: <b>{paid_bundle}</b>\n"
+        f"└ 🔥 Оплатили Сушку: <b>{paid_dry}</b>\n\n"
         "Выберите действие:",
         reply_markup=get_user_management_menu(),
         parse_mode=ParseMode.HTML

@@ -33,3 +33,9 @@ meal_days/
 # OS
 .DS_Store
 Thumbs.db
+
+# Other
+/meal_days/
+.ssh/
+.ssh.pub
+.ssh

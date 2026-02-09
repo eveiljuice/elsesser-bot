@@ -1169,6 +1169,11 @@ def get_user_management_menu() -> InlineKeyboardMarkup:
             action="view", payment_filter="paid_bundle")
     )
     builder.button(
+        text="🔥 Оплатившие Сушку",
+        callback_data=UserListCallback(
+            action="view", payment_filter="paid_dry")
+    )
+    builder.button(
         text="🔍 Поиск пользователя",
         callback_data=UserManageMenuCallback(action="search")
     )
@@ -1195,6 +1200,7 @@ def get_user_list_keyboard(users: list, page: int = 0, per_page: int = 10, filte
         paid_main = user.get('has_paid', 0)
         paid_fmd = user.get('has_paid_fmd', 0)
         paid_bundle = user.get('has_paid_bundle', 0)
+        paid_dry = user.get('has_paid_dry', 0)
 
         status_icons = []
         if paid_main:
@@ -1203,6 +1209,8 @@ def get_user_list_keyboard(users: list, page: int = 0, per_page: int = 10, filte
             status_icons.append("🥗")
         if paid_bundle:
             status_icons.append("🎁")
+        if paid_dry:
+            status_icons.append("🔥")
 
         status_str = "".join(status_icons) if status_icons else "⚪"
 

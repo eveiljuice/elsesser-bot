@@ -61,6 +61,19 @@ python bot.py
 # База данных создаётся автоматически при первом запуске (bot_database.db)
 ```
 
+## CI/CD (GitHub Actions)
+
+- Workflow: `.github/workflows/deploy.yml`
+- Триггер: push в `main`
+- Деплой: SSH на сервер, `git pull`, `pip install -r requirements.txt`, restart systemd сервиса
+
+**Secrets, которые нужны в GitHub:**
+- `SSH_HOST` — IP/домен сервера
+- `SSH_USER` — пользователь SSH
+- `SSH_KEY` — приватный ключ (PEM, без пароля)
+- `DEPLOY_PATH` — путь к репозиторию на сервере
+- `SERVICE_NAME` — имя systemd сервиса (например `elsesser-bot.service`)
+
 ## Code Style Guidelines
 
 - **Именование:** snake_case для функций/переменных, PascalCase для классов
