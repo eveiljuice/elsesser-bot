@@ -28,7 +28,6 @@ env/
 *.swp
 *.swo
 meal_days/
-.github
 
 # OS
 .DS_Store
