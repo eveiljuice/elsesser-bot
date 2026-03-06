@@ -10,7 +10,7 @@ ADMIN_CHANNEL_ID = int(os.getenv('ADMIN_CHANNEL_ID', '0'))
 PAYMENT_AMOUNT = os.getenv('PAYMENT_AMOUNT', '3000')
 
 # FMD Протокол (5 дней, диета имитирующая голодание)
-FMD_PAYMENT_AMOUNT = os.getenv('FMD_PAYMENT_AMOUNT', '1190')
+FMD_PAYMENT_AMOUNT = os.getenv('FMD_PAYMENT_AMOUNT', '888')
 
 # Комплект (Рационы + FMD со скидкой)
 BUNDLE_PAYMENT_AMOUNT = os.getenv('BUNDLE_PAYMENT_AMOUNT', '2990')
